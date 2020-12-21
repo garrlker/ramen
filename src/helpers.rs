@@ -2,6 +2,13 @@
 
 use std::sync::Arc;
 
+/// Helps you create C-compatible string literals, like `c_string!("Hello!")` -> `b"Hello!\0"`.
+macro_rules! c_string {
+    ($s:expr) => {
+        concat!($s, "\0").as_bytes()
+    };
+}
+
 /// Macro to get around the limitation of not being able to write `#[doc = concat!("a", "b", ...)]`.
 macro_rules! document {
     ($comment:expr, $($tt:tt)*) => {
