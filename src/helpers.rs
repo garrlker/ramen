@@ -2,6 +2,14 @@
 
 use std::sync::Arc;
 
+/// Macro to get around the limitation of not being able to write `#[doc = concat!("a", "b", ...)]`.
+macro_rules! document {
+    ($comment:expr, $($tt:tt)*) => {
+        #[doc = $comment]
+        $($tt)*
+    };
+}
+
 /// Simple builder generator.
 macro_rules! gen_builder {
     (
