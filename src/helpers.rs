@@ -114,6 +114,24 @@ impl<T: ?Sized + 'static> Clone for MaybeStatic<T> {
     }
 }
 
+impl<T: ?Sized + 'static> AsRef<T> for MaybeStatic<T> {
+    #[inline]
+    fn as_ref(&self) -> &T {
+        &*self
+    }
+}
+
+impl<T: ?Sized + 'static> Deref for MaybeStatic<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Static(x) => x,
+            Self::Dynamic(x) => x.as_ref(),
+        }
+    }
+}
+
 /// Minimal lazily initialized type, similar to the one in `once_cell`.
 ///
 /// Thread safe initialization, immutable-only access.
