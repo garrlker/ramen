@@ -53,6 +53,45 @@ macro_rules! gen_builder {
     };
 }
 
+/// Trait wrapper generator.
+macro_rules! gen_wrapper {
+    (
+        $(#[$outer:meta])*
+        $s_vis:vis struct $s_ident:ident($dyn_ident:ident : $dyn_repr_ident:path) {
+            $(self: {$(
+                $(#[$fn_outer:meta])*
+                fn $fn_name:ident(&self $(, $name:ident : $ty:ty)* $(,)?) -> $ret:ty;
+            )*})?
+
+            $(mut self: {$(
+                $(#[$fn_outer2:meta])*
+                fn $fn_name2:ident(&mut self $(, $name2:ident : $ty2:ty)* $(,)?) -> $ret2:ty;
+            )*})?
+        }
+    ) => {
+        $(#[$outer])*
+        $s_vis struct $s_ident(pub(crate) $dyn_repr_ident);
+        pub(crate) trait $dyn_ident {
+            $($($(#[$fn_outer] )* fn $fn_name (&self     $(, $name  : $ty )*)   -> $ret;  )*)*
+            $($($(#[$fn_outer2])* fn $fn_name2(&mut self $(, $name2 : $ty2)*)   -> $ret2; )*)*
+        }
+        impl $s_ident {
+            $($(
+                $(#[$fn_outer])* #[inline]
+                pub fn $fn_name(&self, $($name : $ty ,)*) -> $ret {
+                    self.0.$fn_name($($name,)*)
+                }
+            )*)*
+            $($(
+                $(#[$fn_outer2])* #[inline]
+                pub fn $fn_name2(&mut self, $($name2 : $ty2 ,)*) -> $ret2 {
+                    self.0.$fn_name2($($name2,)*)
+                }
+            )*)*
+        }
+    };
+}
+
 /// Used to const initialize fields which don't necessarily need allocation (ex. str).
 pub enum MaybeStatic<T: ?Sized + 'static> {
     Static(&'static T),
