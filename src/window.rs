@@ -3,14 +3,22 @@
 use crate::{
     helpers::{self, MaybeStatic},
     monitor::{/*Point,*/ Size},
+    platform::imp,
 };
-use std::sync::Arc;
 
-/// The whole point of the crate.
-///
-/// To instantiate windows, use a [`builder`](Window::builder).
-pub struct Window {
-    // ...
+gen_wrapper! {
+    /// Represents a window, of course.
+    ///
+    /// To create a window, use a [`builder`](Window::builder).
+    pub struct Window(WindowImpl : imp::WindowRepr) {
+        self: {
+            fn set_visible(&self, visible: bool) -> ();
+        }
+
+        mut self: {
+            fn swap_events(&mut self) -> ();
+        }
+    }
 }
 
 gen_builder! {
