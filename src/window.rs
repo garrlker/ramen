@@ -1,6 +1,6 @@
 //! [`Window`] and related types.
 
-use crate::helpers::MaybeStatic;
+use crate::helpers::{self, MaybeStatic};
 use std::sync::Arc;
 
 /// The whole point of the crate.
@@ -37,5 +37,17 @@ impl Window {
     /// Constructs a [`WindowBuilder`] for instantiating windows.
     pub const fn builder() -> WindowBuilder {
         WindowBuilder::new()
+    }
+}
+
+impl WindowBuilder {
+    /// Sets the initial window title.
+    ///
+    /// Defaults to an empty string (blank).
+    pub fn title(&mut self, title: impl Into<String>) -> &mut Self {
+        let mut title = title.into();
+        helpers::str_filter_nulls(&mut title);
+        self.__title = MaybeStatic::Dynamic(title.into());
+        self
     }
 }
