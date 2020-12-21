@@ -1,2 +1,8 @@
+# cargo builds
 /target
 Cargo.lock
+
+# editor junk
+/.idea
+/.project
+/.vscode
