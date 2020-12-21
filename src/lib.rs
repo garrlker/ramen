@@ -5,6 +5,7 @@
 pub mod helpers;
 
 pub mod monitor;
+pub mod platform;
 pub mod window;
 
 #[cfg(test)]
