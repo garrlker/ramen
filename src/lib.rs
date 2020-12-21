@@ -1,3 +1,7 @@
+//! A neat windowing library.
+
+pub mod window;
+
 #[cfg(test)]
 mod tests {
     #[test]
