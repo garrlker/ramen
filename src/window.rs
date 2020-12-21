@@ -1,6 +1,9 @@
 //! [`Window`] and related types.
 
-use crate::helpers::{self, MaybeStatic};
+use crate::{
+    helpers::{self, MaybeStatic},
+    monitor::{/*Point,*/ Size},
+};
 use std::sync::Arc;
 
 /// The whole point of the crate.
@@ -18,6 +21,16 @@ gen_builder! {
         ///
         /// Prefer [`Window::builder`] for instantiation to avoid needing additional imports.
         pub const fn new() -> Self {
+            /// Sets the inner size of the window.
+            ///
+            /// If the size is given in *logical* numbers,
+            /// DPI scaling is applied and will update dynamically.\
+            /// If the size is given in *physical* numbers,
+            /// no DPI scaling is done and it's used as an exact pixel value.
+            ///
+            /// Defaults to `Size::Logical(800.0, 608.0)`.
+            inner_size: Size = Size::Logical(800.0, 608.0),
+
             /// Sets whether the window is initially visible.
             ///
             /// Defaults to `true`.
