@@ -1,10 +1,9 @@
 //! A neat windowing library.
 
-#[macro_use]
-pub(crate) mod macros;
-
 #[doc(hidden)]
+#[macro_use]
 pub mod helpers;
+
 pub mod window;
 
 #[cfg(test)]
