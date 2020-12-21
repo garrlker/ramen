@@ -3,6 +3,8 @@
 #[macro_use]
 pub(crate) mod macros;
 
+#[doc(hidden)]
+pub mod helpers;
 pub mod window;
 
 #[cfg(test)]
