@@ -1,6 +1,6 @@
 //! Helper types and methods for use mainly within `pub(crate)` context.
 
-use std::sync::Arc;
+use std::{ptr, sync::{Arc, Once}};
 
 /// Helps you create C-compatible string literals, like `c_string!("Hello!")` -> `b"Hello!\0"`.
 macro_rules! c_string {
@@ -54,16 +54,24 @@ macro_rules! gen_builder {
 }
 
 /// Used to const initialize fields which don't necessarily need allocation (ex. str).
-#[derive(Clone)]
-pub enum MaybeStatic<T: ?Sized> {
+pub enum MaybeStatic<T: ?Sized + 'static> {
     Static(&'static T),
     Dynamic(Arc<T>),
 }
 
-impl<T: ?Sized> From<&'static T> for MaybeStatic<T> {
+impl<T: ?Sized + 'static> From<&'static T> for MaybeStatic<T> {
     #[inline]
     fn from(x: &'static T) -> Self {
         Self::Static(x)
+    }
+}
+
+impl<T: ?Sized + 'static> Clone for MaybeStatic<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Static(x) => Self::Static(x),
+            Self::Dynamic(x) => Self::Dynamic(x.clone()),
+        }
     }
 }
 
