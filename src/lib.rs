@@ -4,6 +4,7 @@
 #[macro_use]
 pub mod helpers;
 
+pub mod error;
 pub mod monitor;
 pub mod platform;
 pub mod window;
