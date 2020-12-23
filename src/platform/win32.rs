@@ -10,11 +10,13 @@ use crate::{
     window::{WindowBuilder, WindowImpl},
 };
 use std::{cell, ffi, fmt, mem, ops, ptr, slice, thread};
-use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::sync::{Arc, Condvar, Mutex}; // move later
 
 /// Global lock used to synchronize classes being registered or queried.
 static CLASS_REGISTRY_LOCK: LazyCell<Mutex<()>> = LazyCell::new(Default::default);
+
+/// Empty wide string (to point to)
+static EMPTY_WIDE_STRING: &[WCHAR] = &[0x00];
 
 /// Retrieves the base module HINSTANCE.
 #[inline]
@@ -28,17 +30,12 @@ fn this_hinstance() -> HINSTANCE {
     (unsafe { &__ImageBase }) as *const [u8; 64] as HINSTANCE
 }
 
-fn widen_string(s: &str) -> impl Iterator<Item = WCHAR> + '_ {
-    <str as AsRef<ffi::OsStr>>::as_ref(s)
-        .encode_wide()
-        .chain(Some(0x00))
-}
-
 unsafe fn error_string_repr(err: DWORD) -> String {
     // This cast is no mistake, the function wants `LPWSTR *`, and not `LPWSTR`
     let mut buffer: *mut WCHAR = ptr::null_mut();
     let buf_ptr = (&mut buffer as *mut LPWSTR) as LPWSTR;
 
+    // Query error string
     let char_count = FormatMessageW(
         FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
         ptr::null(),
@@ -48,13 +45,90 @@ unsafe fn error_string_repr(err: DWORD) -> String {
         0,
         ptr::null_mut(),
     );
-    assert_ne!(char_count, 0);
+    debug_assert_ne!(char_count, 0);
 
-    let wide_string = slice::from_raw_parts(buffer, char_count as usize);
-    let os_message = ffi::OsString::from_wide(wide_string);
-    let message = os_message.to_string_lossy().into_owned();
-    LocalFree(buf_ptr.cast());
-    message
+    // Convert to `String`, free allocated OS buffer
+    let mut message = Vec::new();
+    lpcwstr_to_str(buffer, &mut message);
+    LocalFree(buffer.cast());
+    String::from_utf8_lossy(&message).into_owned()
+}
+
+fn str_to_wide_null<'s, 'v>(s: &'s str, buffer: &'v mut Vec<WCHAR>) -> LPCWSTR {
+    // NOTE: Yes, indeed, `std::os::windows::ffi::OsStr(ing)ext` does exist in the standard library,
+    // but it requires you to fit your data in the OsStr(ing) model and it's not hyper optimized
+    // unlike mb2wc with handwritten SSE (allegedly), alongside being the native conversion function
+
+    // MultiByteToWideChar can't actually handle 0 length because 0 return means error
+    if s.is_empty() {
+        return EMPTY_WIDE_STRING.as_ptr()
+    }
+
+    unsafe {
+        let lpcstr: LPCSTR = s.as_ptr().cast();
+        let str_len = s.len() as c_int;
+        debug_assert!(s.len() <= c_int::max_value() as usize, "string length overflows c_int");
+
+        // Calculate buffer size
+        let wchar_count = MultiByteToWideChar(
+            CP_UTF8, 0, lpcstr, str_len,
+            ptr::null_mut(), 0, // buffer == NULL means query size
+        ) as usize;
+        debug_assert_ne!(0, wchar_count, "error in MultiByteToWideChar");
+
+        // Preallocate enough space (including null terminator past end)
+        let wchar_count_null = wchar_count + 1;
+        buffer.clear();
+        buffer.reserve(wchar_count_null);
+
+        // Write to our buffer
+        let chars_written = MultiByteToWideChar(
+            CP_UTF8, 0, lpcstr, str_len,
+            buffer.as_mut_ptr(), wchar_count as c_int,
+        );
+        buffer.set_len(wchar_count);
+        debug_assert_eq!(wchar_count, chars_written as usize, "invalid char count received");
+
+        // Filter nulls, as Rust allows them in &str
+        for x in &mut *buffer {
+            if *x == 0x00 {
+                *x = b' ' as WCHAR; // 0x00 => Space
+            }
+        }
+
+        // Add null terminator & yield
+        *buffer.as_mut_ptr().add(wchar_count) = 0x00;
+        buffer.set_len(wchar_count_null);
+        buffer.as_ptr()
+    }
+}
+
+fn lpcwstr_to_str(s: LPCWSTR, buffer: &mut Vec<u8>) {
+    // This is more or less the inverse of `str_to_wide_null`, works the same way
+
+    buffer.clear();
+    unsafe {
+        // Zero-length strings can't be processed like in MB2WC because 0 == Error...
+        if *s == 0x00 {
+            return
+        }
+
+        // Calculate buffer size
+        let count = WideCharToMultiByte(
+            CP_UTF8, 0, s, -1, ptr::null_mut(),
+            0, ptr::null(), ptr::null_mut(),
+        );
+        debug_assert_ne!(count, 0, "failed to count wchars in wstr -> str");
+
+        // Preallocate required amount, decode to buffer
+        buffer.reserve(count as usize);
+        let res = WideCharToMultiByte(
+            CP_UTF8, 0, s, -1, buffer.as_mut_ptr(),
+            count, ptr::null(), ptr::null_mut(),
+        );
+        debug_assert_ne!(res, 0, "failure in wchar -> str");
+        buffer.set_len(count as usize - 1); // nulled input -> null in output
+    }
 }
 
 #[derive(Debug)]
@@ -168,13 +242,15 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
     let window_thread = thread_builder.spawn(move || unsafe {
         // TODO: Sanitize reserved window classes
         let mut class_info = mem::MaybeUninit::<WNDCLASSEXW>::uninit();
-        let class_name = widen_string(builder.__class_name.as_ref()).collect::<Vec<_>>();
         (&mut *class_info.as_mut_ptr()).cbSize = mem::size_of_val(&class_info) as DWORD;
+
+        let mut wstr_buf = Vec::new();
+        let class_name = str_to_wide_null(builder.__class_name.as_ref(), &mut wstr_buf);
 
         // Create the window class if it doesn't exist yet
         let class_atom: ATOM;
         let class_registry_lock = CLASS_REGISTRY_LOCK.lock().unwrap();
-        if GetClassInfoExW(this_hinstance(), class_name.as_ptr(), class_info.as_mut_ptr()) == 0 {
+        if GetClassInfoExW(this_hinstance(), class_name, class_info.as_mut_ptr()) == 0 {
             // The window class not existing sets the thread global error flag,
             // we clear it immediately to avoid any confusion down the line.
             SetLastError(ERROR_SUCCESS);
@@ -190,28 +266,26 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
             class.hCursor = ptr::null_mut();
             class.hbrBackground = ptr::null_mut();
             class.lpszMenuName = ptr::null_mut();
-            class.lpszClassName = class_name.as_ptr();
+            class.lpszClassName = class_name;
             class.hIconSm = ptr::null_mut();
 
             class_atom = RegisterClassExW(class);
         } else {
             // If the class already exists, query the atom for the class name
-            class_atom = GlobalFindAtomW(class_name.as_ptr());
+            class_atom = GlobalFindAtomW(class_name);
         }
         mem::drop(class_registry_lock);
+        wstr_buf.clear();
 
         // The fields on `RegisterClassExW` are correct so this shouldn't happen, but might as well
         debug_assert_ne!(class_atom, 0);
-
-        // `class_name` is no longer needed, as `class_atom` maps to a copy managed by the OS
-        mem::drop(class_name);
 
         let style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
         let style_ex = 0;
 
         let width = 1280;
         let height = 720;
-        let title = widen_string(builder.__title.as_ref()).collect::<Vec<_>>();
+        let title = str_to_wide_null(builder.__title.as_ref(), &mut wstr_buf);
         let user_data: Box<cell::UnsafeCell<WindowUserData>> = Default::default();
 
         let builder_ptr = (&builder) as *const WindowBuilder;
@@ -222,7 +296,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         let hwnd = CreateWindowExW(
             style_ex,
             class_atom as LPCWSTR,
-            title.as_ptr(),
+            title,
             style,
             CW_USEDEFAULT,
             CW_USEDEFAULT,

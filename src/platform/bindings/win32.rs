@@ -54,6 +54,7 @@ pub type LANGID = USHORT;
 pub type LONG = c_long;
 pub type LONG_PTR = isize;
 pub type LPARAM = LONG_PTR;
+pub type LPCSTR = *const CHAR;
 pub type LPCVOID = *const c_void;
 pub type LPCWSTR = *const WCHAR;
 pub type LPVOID = *mut c_void;
@@ -71,6 +72,7 @@ pub type WPARAM = UINT_PTR;
 pub type WNDPROC = unsafe extern "system" fn(HWND, UINT, WPARAM, LPARAM) -> LRESULT;
 
 // Constants
+pub const CP_UTF8: DWORD = 65001;
 pub const CS_OWNDC: UINT = 0x0020;
 pub const CW_USEDEFAULT: c_int = 0x80000000;
 pub const ERROR_SUCCESS: DWORD = 0; // lol
@@ -165,8 +167,26 @@ extern "system" {
         dwLanguageId: DWORD,
         lpBuffer: LPWSTR,
         nSize: DWORD,
-        Arguments: *mut c_void, // `va_list` (but we don't use it)
+        Arguments: *mut c_void, // `va_list` (we don't use it)
     ) -> DWORD;
+    pub fn MultiByteToWideChar(
+        CodePage: UINT,
+        dwFlags: DWORD,
+        lpMultiByteStr: LPCSTR,
+        cbMultiByte: c_int,
+        lpWideCharStr: LPWSTR,
+        cchWideChar: c_int,
+    ) -> c_int;
+    pub fn WideCharToMultiByte(
+        CodePage: UINT,
+        dwFlags: DWORD,
+        lpWideCharStr: LPCWSTR,
+        cchWideChar: c_int,
+        lpMultiByteStr: *mut u8,
+        cbMultiByte: c_int,
+        lpDefaultChar: LPCSTR,
+        lpUsedDefaultChar: *mut BOOL,
+    ) -> c_int;
 }
 #[link(name = "User32")]
 extern "system" {
