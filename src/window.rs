@@ -2,6 +2,7 @@
 
 use crate::{
     error::Error,
+    event::Event,
     helpers::{self, MaybeStatic},
     monitor::{/*Point,*/ Size},
     platform::imp,
@@ -13,6 +14,7 @@ gen_wrapper! {
     /// To create a window, use a [`builder`](Window::builder).
     pub struct Window(WindowImpl : imp::WindowRepr) {
         self: {
+            fn events(&self) -> &[Event];
             fn set_visible(&self, visible: bool) -> ();
         }
 
