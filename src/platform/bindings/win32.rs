@@ -87,6 +87,7 @@ pub const WM_DESTROY: UINT = 0x0002;
 pub const WM_CLOSE: UINT = 0x0010;
 pub const WM_NCCREATE: UINT = 0x0081;
 pub const WM_NCDESTROY: UINT = 0x0082;
+pub const WM_USER: UINT = 0x0400;
 pub const WS_BORDER: DWORD = 0x00800000;
 pub const WS_CAPTION: DWORD = 0x00C00000;
 pub const WS_CHILD: DWORD = 0x40000000;

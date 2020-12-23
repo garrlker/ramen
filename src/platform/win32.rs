@@ -6,7 +6,7 @@ use self::bindings::*;
 
 use crate::{
     error::Error,
-    event::Event,
+    event::{CloseReason, Event},
     helpers::LazyCell,
     window::{WindowBuilder, WindowImpl},
 };
@@ -23,6 +23,9 @@ static EMPTY_WIDE_STRING: &[WCHAR] = &[0x00];
 ///
 /// TODO: This should be bigger than normal if input is enabled
 const EVENT_BUF_INITIAL_SIZE: usize = 512;
+
+// Custom events
+const RAMEN_WM_CLOSE: UINT = WM_USER + 0;
 
 /// Retrieves the base module HINSTANCE.
 #[inline]
@@ -183,12 +186,14 @@ struct WindowCreateParams {
 }
 
 struct WindowUserData {
+    close_reason: Option<CloseReason>,
     event_queue: Mutex<Vec<Event>>,
 }
 
 impl Default for WindowUserData {
     fn default() -> Self {
         Self {
+            close_reason: None,
             event_queue: Mutex::new(Vec::with_capacity(EVENT_BUF_INITIAL_SIZE)),
         }
     }
@@ -217,6 +222,13 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
         &mut *(get_window_data(hwnd, GWLP_USERDATA) as *mut WindowUserData)
     }
 
+    #[inline]
+    unsafe fn push_event(user_data: &mut WindowUserData, event: Event) {
+        let mut lock = user_data.event_queue.lock().unwrap();
+        lock.push(event);
+        mem::drop(lock);
+    }
+
     match msg {
         WM_DESTROY => {
             PostQuitMessage(0);
@@ -224,7 +236,9 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
         },
 
         WM_CLOSE => {
-            DestroyWindow(hwnd);
+            let user_data = user_data(hwnd);
+            let reason = user_data.close_reason.take().unwrap_or(CloseReason::Unknown);
+            push_event(user_data, Event::CloseRequest(reason));
             0
         },
 
@@ -242,6 +256,12 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             // finalize
             DefWindowProcW(hwnd, msg, wparam, lparam)
         },
+
+        RAMEN_WM_CLOSE => {
+            DestroyWindow(hwnd);
+            0
+        },
+
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
@@ -391,9 +411,9 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
 
 impl ops::Drop for Window {
     fn drop(&mut self) {
-        // unsafe {
-        //     // TODO: X_WM_CLOSE, etc
-        // }
+        unsafe {
+            PostMessageW(self.hwnd, RAMEN_WM_CLOSE, 0, 0);
+        }
         let _ = self.thread.take().map(thread::JoinHandle::join);
     }
 }
