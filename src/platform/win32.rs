@@ -6,10 +6,11 @@ use self::bindings::*;
 
 use crate::{
     error::Error,
+    event::Event,
     helpers::LazyCell,
     window::{WindowBuilder, WindowImpl},
 };
-use std::{cell, ffi, fmt, mem, ops, ptr, slice, thread};
+use std::{cell, fmt, mem, ops, ptr, thread};
 use std::sync::{Arc, Condvar, Mutex}; // move later
 
 /// Global lock used to synchronize classes being registered or queried.
@@ -17,6 +18,11 @@ static CLASS_REGISTRY_LOCK: LazyCell<Mutex<()>> = LazyCell::new(Default::default
 
 /// Empty wide string (to point to)
 static EMPTY_WIDE_STRING: &[WCHAR] = &[0x00];
+
+/// The initial capacity of the `Vec<Event>` structures
+///
+/// TODO: This should be bigger than normal if input is enabled
+const EVENT_BUF_INITIAL_SIZE: usize = 512;
 
 /// Retrieves the base module HINSTANCE.
 #[inline]
@@ -163,6 +169,7 @@ pub(crate) struct Window {
 
     // api
     user_data: Box<cell::UnsafeCell<WindowUserData>>,
+    event_buffer: Vec<Event>,
 }
 unsafe impl Send for Window {}
 unsafe impl Sync for Window {}
@@ -176,24 +183,32 @@ struct WindowCreateParams {
 }
 
 struct WindowUserData {
-    destroy_class: bool,
+    event_queue: Mutex<Vec<Event>>,
 }
 
 impl Default for WindowUserData {
     fn default() -> Self {
         Self {
-            destroy_class: false,
+            event_queue: Mutex::new(Vec::with_capacity(EVENT_BUF_INITIAL_SIZE)),
         }
     }
 }
 
 impl WindowImpl for Window {
+    fn events(&self) -> &[Event] {
+        self.event_buffer.as_slice()
+    }
+
     fn set_visible(&self, visible: bool) {
         let _ = visible;
     }
 
     fn swap_events(&mut self) {
-        // ...
+        let user_data = unsafe { &mut *self.user_data.get() };
+        let mut vec_lock = user_data.event_queue.lock().unwrap();
+        mem::swap(&mut self.event_buffer, vec_lock.as_mut());
+        vec_lock.clear();
+        mem::drop(vec_lock);
     }
 }
 
@@ -326,6 +341,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
                 hwnd,
                 thread: None,
                 user_data,
+                event_buffer: Vec::with_capacity(EVENT_BUF_INITIAL_SIZE),
             }),
         });
         condvar.notify_one();
