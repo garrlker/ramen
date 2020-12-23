@@ -9,7 +9,8 @@ use crate::{
     helpers::LazyCell,
     window::{WindowBuilder, WindowImpl},
 };
-use std::{cell, ffi, mem, ops, ptr, thread};
+use std::{cell, ffi, fmt, mem, ops, ptr, slice, thread};
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::sync::{Arc, Condvar, Mutex}; // move later
 
 /// Global lock used to synchronize classes being registered or queried.
@@ -28,10 +29,56 @@ fn this_hinstance() -> HINSTANCE {
 }
 
 fn widen_string(s: &str) -> impl Iterator<Item = WCHAR> + '_ {
-    use std::os::windows::ffi::OsStrExt;
     <str as AsRef<ffi::OsStr>>::as_ref(s)
         .encode_wide()
         .chain(Some(0x00))
+}
+
+unsafe fn error_string_repr(err: DWORD) -> String {
+    // This cast is no mistake, the function wants `LPWSTR *`, and not `LPWSTR`
+    let mut buffer: *mut WCHAR = ptr::null_mut();
+    let buf_ptr = (&mut buffer as *mut LPWSTR) as LPWSTR;
+
+    let char_count = FormatMessageW(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        ptr::null(),
+        err,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT).into(),
+        buf_ptr,
+        0,
+        ptr::null_mut(),
+    );
+    assert_ne!(char_count, 0);
+
+    let wide_string = slice::from_raw_parts(buffer, char_count as usize);
+    let os_message = ffi::OsString::from_wide(wide_string);
+    let message = os_message.to_string_lossy().into_owned();
+    LocalFree(buf_ptr.cast());
+    message
+}
+
+#[derive(Debug)]
+pub struct InternalError {
+    code: DWORD,
+    context: &'static str,
+    message: String,
+}
+
+impl std::error::Error for InternalError {}
+impl fmt::Display for InternalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} (Code {:#06X}; {})", self.message.as_str(), self.code, self.context)
+    }
+}
+
+impl InternalError {
+    pub fn from_winapi(context: &'static str, code: DWORD) -> Self {
+        Self {
+            code,
+            context,
+            message: unsafe { error_string_repr(code) },
+        }
+    }
 }
 
 pub(crate) struct Window {
@@ -51,6 +98,7 @@ pub(crate) type WindowRepr = Window;
 struct WindowCreateParams {
     builder_ptr: *const WindowBuilder,
     user_data_ptr: *mut WindowUserData,
+    error_return: Option<Error>,
 }
 
 struct WindowUserData {
@@ -110,11 +158,14 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
 }
 
 pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> {
+    // Condvar & mutex pair for receiving the `Result<WindowRepr, Error>` from spawned thread
     let signal = Arc::new((Mutex::<Option<Result<WindowRepr, Error>>>::new(None), Condvar::new()));
 
     let builder = builder.clone();
     let cond_pair = Arc::clone(&signal);
-    let window_thread = thread::spawn(move || unsafe {
+    let thread_builder = thread::Builder::new()
+        .name(format!("Window Thread (Class \"{}\")", builder.__class_name.as_ref()));
+    let window_thread = thread_builder.spawn(move || unsafe {
         // TODO: Sanitize reserved window classes
         let mut class_info = mem::MaybeUninit::<WNDCLASSEXW>::uninit();
         let class_name = widen_string(builder.__class_name.as_ref()).collect::<Vec<_>>();
@@ -128,7 +179,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
             // we clear it immediately to avoid any confusion down the line.
             SetLastError(ERROR_SUCCESS);
 
-            // Fill in & register class (cbSize is set before this `if` block)
+            // Fill in & register class (`cbSize` is set before this `if` block)
             let class = &mut *class_info.as_mut_ptr();
             class.style = CS_OWNDC;
             class.lpfnWndProc = window_proc;
@@ -143,17 +194,14 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
             class.hIconSm = ptr::null_mut();
 
             class_atom = RegisterClassExW(class);
-            if class_atom == 0 {
-                todo!("handle the class not registering")
-            }
         } else {
             // If the class already exists, query the atom for the class name
             class_atom = GlobalFindAtomW(class_name.as_ptr());
         }
         mem::drop(class_registry_lock);
 
-        // TODO: what
-        assert_ne!(class_atom, 0);
+        // The fields on `RegisterClassExW` are correct so this shouldn't happen, but might as well
+        debug_assert_ne!(class_atom, 0);
 
         // `class_name` is no longer needed, as `class_atom` maps to a copy managed by the OS
         mem::drop(class_name);
@@ -168,8 +216,9 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
 
         let builder_ptr = (&builder) as *const WindowBuilder;
         let user_data_ptr = user_data.as_ref().get();
-        let mut params = WindowCreateParams { builder_ptr, user_data_ptr };
+        let mut params = WindowCreateParams { builder_ptr, user_data_ptr, error_return: None };
 
+        // Creates the window - this waits for `WM_NCCREATE` & `WM_CREATE` to return (in that order)
         let hwnd = CreateWindowExW(
             style_ex,
             class_atom as LPCWSTR,
@@ -185,28 +234,37 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
             (&mut params) as *mut WindowCreateParams as LPVOID,
         );
 
-        // TODO: if hwnd bad
+        // Handle the window failing to create from an unknown reason
+        if hwnd.is_null() && params.error_return.is_none() {
+            params.error_return = Some(Error::from_internal(InternalError::from_winapi(
+                "CreateWindowExW returned NULL.",
+                GetLastError(),
+            )));
+        }
 
         // Yield window struct, signal outer function
         let (mutex, condvar) = &*cond_pair;
         let mut lock = mutex.lock().unwrap();
-        *lock = Some(Ok(Window {
-            class: class_atom,
-            hwnd,
-            thread: None,
-            user_data,
-        }));
+        *lock = Some(match params.error_return {
+            Some(err) => Err(err),
+            None => Ok(Window {
+                class: class_atom,
+                hwnd,
+                thread: None,
+                user_data,
+            }),
+        });
         condvar.notify_one();
         mem::drop(lock);
 
-        // Release condvar + mutex pair so the Arc is deallocated once the outer function returns
+        // Release condvar + mutex pair so the `Arc` contents are deallocated once the outer fn returns
         mem::drop(cond_pair);
 
         // Run message loop until error or exit
         let mut msg = mem::MaybeUninit::<MSG>::zeroed().assume_init();
         'message_loop: loop {
             // `HWND hWnd` is set to NULL here to query all messages on the thread,
-            // as the exit condition/signal (WM_QUIT) is not associated with any window.
+            // as the exit condition/signal `WM_QUIT` is not associated with any window.
             // This is one of the main motivations (besides no blocking) to give each window a thread.
             match GetMessageW(&mut msg, ptr::null_mut(), 0, 0) {
                 -1 => panic!("Hard error {:#06X} in GetMessageW loop!", GetLastError()),
@@ -224,7 +282,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
 
         // TODO: Don't do this, obviously.
         ExitProcess(0);
-    });
+    }).expect("Failed to spawn window thread");
 
     // Wait until the thread is done creating the window or notifying us why it couldn't do that
     let (mutex, condvar) = &*signal;

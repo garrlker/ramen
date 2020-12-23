@@ -47,17 +47,22 @@ pub type BYTE = c_uchar;
 pub type CHAR = c_char;
 pub type DWORD = c_ulong;
 pub type HANDLE = *mut c_void;
+pub type HLOCAL = HANDLE;
 pub type HRESULT = c_long;
 pub type INT = c_int;
+pub type LANGID = USHORT;
 pub type LONG = c_long;
 pub type LONG_PTR = isize;
 pub type LPARAM = LONG_PTR;
+pub type LPCVOID = *const c_void;
 pub type LPCWSTR = *const WCHAR;
 pub type LPVOID = *mut c_void;
+pub type LPWSTR = *mut WCHAR;
 pub type LRESULT = LONG_PTR;
 pub type UINT = c_uint;
 pub type UINT_PTR = usize;
 pub type ULONG_PTR = usize;
+pub type USHORT = c_ushort;
 pub type WCHAR = wchar_t;
 pub type WORD = c_ushort;
 pub type WPARAM = UINT_PTR;
@@ -69,7 +74,12 @@ pub type WNDPROC = unsafe extern "system" fn(HWND, UINT, WPARAM, LPARAM) -> LRES
 pub const CS_OWNDC: UINT = 0x0020;
 pub const CW_USEDEFAULT: c_int = 0x80000000;
 pub const ERROR_SUCCESS: DWORD = 0; // lol
+pub const FORMAT_MESSAGE_ALLOCATE_BUFFER: DWORD = 0x00000100;
+pub const FORMAT_MESSAGE_FROM_SYSTEM: DWORD = 0x00001000;
+pub const FORMAT_MESSAGE_IGNORE_INSERTS: DWORD = 0x00000200;
 pub const GWLP_USERDATA: c_int = -21;
+pub const LANG_NEUTRAL: USHORT = 0x00;
+pub const SUBLANG_DEFAULT: USHORT = 0x01;
 pub const WM_CREATE: UINT = 0x0001;
 pub const WM_DESTROY: UINT = 0x0002;
 pub const WM_CLOSE: UINT = 0x0010;
@@ -146,6 +156,17 @@ extern "system" {
     pub fn GetLastError() -> DWORD;
     pub fn SetLastError(dwErrCode: DWORD);
     pub fn ExitProcess(uExitCode: UINT);
+
+    pub fn LocalFree(hMem: HLOCAL) -> HLOCAL;
+    pub fn FormatMessageW(
+        dwFlags: DWORD,
+        lpSource: LPCVOID,
+        dwMessageId: DWORD,
+        dwLanguageId: DWORD,
+        lpBuffer: LPWSTR,
+        nSize: DWORD,
+        Arguments: *mut c_void, // `va_list` (but we don't use it)
+    ) -> DWORD;
 }
 #[link(name = "User32")]
 extern "system" {
@@ -228,4 +249,10 @@ pub unsafe fn set_window_data(hwnd: HWND, offset: c_int, data: usize) -> usize {
 #[cfg(target_pointer_width = "64")]
 pub unsafe fn set_window_data(hwnd: HWND, offset: c_int, data: usize) -> usize {
     SetWindowLongPtrW(hwnd, offset, data as LONG_PTR) as usize
+}
+
+// Macros
+#[inline]
+pub fn MAKELANGID(p: USHORT, s: USHORT) -> LANGID {
+    (s << 10) | p
 }
