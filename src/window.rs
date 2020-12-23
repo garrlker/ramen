@@ -1,6 +1,7 @@
 //! [`Window`] and related types.
 
 use crate::{
+    error::Error,
     helpers::{self, MaybeStatic},
     monitor::{/*Point,*/ Size},
     platform::imp,
@@ -70,5 +71,11 @@ impl WindowBuilder {
         helpers::str_filter_nulls(&mut title);
         self.__title = MaybeStatic::Dynamic(title.into());
         self
+    }
+}
+
+impl WindowBuilder {
+    pub fn build(&self) -> Result<Window, Error> {
+        imp::make_window(self).map(|repr| Window(repr))
     }
 }
