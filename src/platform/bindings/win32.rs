@@ -191,10 +191,9 @@ extern "system" {
 }
 #[link(name = "User32")]
 extern "system" {
-    // Window class management & global atom table
+    // Window class management
     pub fn GetClassInfoExW(hinst: HINSTANCE, lpszClass: LPCWSTR, lpwcx: *mut WNDCLASSEXW) -> BOOL;
     pub fn RegisterClassExW(lpWndClass: *const WNDCLASSEXW) -> ATOM;
-    pub fn GlobalFindAtomW(lpString: LPCWSTR) -> ATOM;
 
     // Window management
     pub fn CreateWindowExW(

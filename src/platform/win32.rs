@@ -63,7 +63,7 @@ unsafe fn error_string_repr(err: DWORD) -> String {
     String::from_utf8_lossy(&message).into_owned()
 }
 
-fn str_to_wide_null<'s, 'v>(s: &'s str, buffer: &'v mut Vec<WCHAR>) -> LPCWSTR {
+fn str_to_wide_null<'s, 'v>(s: &str, buffer: &mut Vec<WCHAR>) -> LPCWSTR {
     // NOTE: Yes, indeed, `std::os::windows::ffi::OsStr(ing)ext` does exist in the standard library,
     // but it requires you to fit your data in the OsStr(ing) model and it's not hyper optimized
     // unlike mb2wc with handwritten SSE (allegedly), alongside being the native conversion function
@@ -166,7 +166,6 @@ impl InternalError {
 
 pub(crate) struct Window {
     // guts
-    class: ATOM,
     hwnd: HWND,
     thread: Option<thread::JoinHandle<()>>,
 
@@ -279,11 +278,10 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         let mut class_info = mem::MaybeUninit::<WNDCLASSEXW>::uninit();
         (&mut *class_info.as_mut_ptr()).cbSize = mem::size_of_val(&class_info) as DWORD;
 
-        let mut wstr_buf = Vec::new();
-        let class_name = str_to_wide_null(builder.__class_name.as_ref(), &mut wstr_buf);
+        let mut class_name_buf = Vec::new();
+        let class_name = str_to_wide_null(builder.__class_name.as_ref(), &mut class_name_buf);
 
         // Create the window class if it doesn't exist yet
-        let class_atom: ATOM;
         let class_registry_lock = CLASS_REGISTRY_LOCK.lock().unwrap();
         if GetClassInfoExW(this_hinstance(), class_name, class_info.as_mut_ptr()) == 0 {
             // The window class not existing sets the thread global error flag,
@@ -304,23 +302,17 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
             class.lpszClassName = class_name;
             class.hIconSm = ptr::null_mut();
 
-            class_atom = RegisterClassExW(class);
-        } else {
-            // If the class already exists, query the atom for the class name
-            class_atom = GlobalFindAtomW(class_name);
+            // The fields on `WNDCLASSEXW` are valid so this can't fail
+            RegisterClassExW(class);
         }
         mem::drop(class_registry_lock);
-        wstr_buf.clear();
-
-        // The fields on `RegisterClassExW` are correct so this shouldn't happen, but might as well
-        debug_assert_ne!(class_atom, 0);
 
         let style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
         let style_ex = 0;
 
         let width = 1280;
         let height = 720;
-        let title = str_to_wide_null(builder.__title.as_ref(), &mut wstr_buf);
+        let mut title = Vec::new();
         let user_data: Box<cell::UnsafeCell<WindowUserData>> = Default::default();
 
         let builder_ptr = (&builder) as *const WindowBuilder;
@@ -330,8 +322,8 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         // Creates the window - this waits for `WM_NCCREATE` & `WM_CREATE` to return (in that order)
         let hwnd = CreateWindowExW(
             style_ex,
-            class_atom as LPCWSTR,
-            title,
+            class_name,
+            str_to_wide_null(builder.__title.as_ref(), &mut title),
             style,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -352,12 +344,13 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         }
 
         // Yield window struct, signal outer function
+        // NOTE: For future developments, do not insert panics before this,
+        // or the waiting condvar never gets anything and thus the outer fn never returns
         let (mutex, condvar) = &*cond_pair;
         let mut lock = mutex.lock().unwrap();
         *lock = Some(match params.error_return {
             Some(err) => Err(err),
             None => Ok(Window {
-                class: class_atom,
                 hwnd,
                 thread: None,
                 user_data,
@@ -369,6 +362,10 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
 
         // Release condvar + mutex pair so the `Arc` contents are deallocated once the outer fn returns
         mem::drop(cond_pair);
+
+        // Free unused buffers
+        mem::drop(class_name_buf);
+        mem::drop(title);
 
         // Run message loop until error or exit
         let mut msg = mem::MaybeUninit::<MSG>::zeroed().assume_init();
