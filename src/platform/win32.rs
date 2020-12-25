@@ -8,7 +8,7 @@ use crate::{
     error::Error,
     event::{CloseReason, Event},
     helpers::LazyCell,
-    window::{WindowBuilder, WindowImpl},
+    window::{WindowBuilder, WindowControls, WindowImpl, WindowStyle},
 };
 use std::{cell, fmt, mem, ops, ptr, thread};
 use std::sync::{Arc, Condvar, Mutex}; // move later
@@ -184,9 +184,39 @@ struct WindowCreateParams {
     error_return: Option<Error>,
 }
 
+impl WindowStyle {
+    /// Gets this style as a bitfield. Note that it does not include the close button.
+    /// The close button is a menu property, not a window style.
+    pub fn as_bitfield(&self) -> DWORD {
+        let mut style = if self.borderless {
+            WS_POPUP
+        } else {
+            let mut style = WS_OVERLAPPED | WS_BORDER | WS_CAPTION;
+            if self.resizable {
+                style |= WS_THICKFRAME;
+            }
+            if let Some(controls) = &self.controls {
+                if controls.minimize {
+                    style |= WS_MINIMIZEBOX;
+                }
+                if controls.maximize {
+                    style |= WS_MAXIMIZEBOX;
+                }
+                style |= WS_SYSMENU;
+            }
+            style
+        };
+        if self.visible {
+            style |= WS_VISIBLE;
+        }
+        style
+    }
+}
+
 struct WindowUserData {
     close_reason: Option<CloseReason>,
     event_queue: Mutex<Vec<Event>>,
+    window_style: WindowStyle,
 }
 
 impl Default for WindowUserData {
@@ -194,6 +224,7 @@ impl Default for WindowUserData {
         Self {
             close_reason: None,
             event_queue: Mutex::new(Vec::with_capacity(EVENT_BUF_INITIAL_SIZE)),
+            window_style: Default::default(),
         }
     }
 }
@@ -307,7 +338,14 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         }
         mem::drop(class_registry_lock);
 
-        let style = WS_OVERLAPPEDWINDOW | WS_VISIBLE;
+        let window_style = WindowStyle {
+            borderless: builder.borderless,
+            resizable: builder.resizable,
+            visible: builder.visible,
+            controls: builder.controls.clone(),
+        };
+
+        let style = window_style.as_bitfield();
         let style_ex = 0;
 
         let width = 1280;
@@ -386,9 +424,6 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         // Registered window classes are unregistered automatically when the process closes.
         // Until then, there's no reason not to have them around as the contents never vary.
         // > if something { UnregisterClassW(class_atom); }
-
-        // TODO: Don't do this, obviously.
-        ExitProcess(0);
     }).expect("Failed to spawn window thread");
 
     // Wait until the thread is done creating the window or notifying us why it couldn't do that

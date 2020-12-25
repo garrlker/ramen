@@ -32,6 +32,10 @@ gen_builder! {
         ///
         /// Prefer [`Window::builder`] for instantiation to avoid needing additional imports.
         pub const fn new() -> Self {
+            borderless: bool = false,
+
+            controls: Option<WindowControls> = Some(WindowControls::no_maximize()),
+
             /// Sets the inner size of the window.
             ///
             /// If the size is given in *logical* numbers,
@@ -41,6 +45,8 @@ gen_builder! {
             ///
             /// Defaults to `Size::Logical(800.0, 608.0)`.
             inner_size: Size = Size::Logical(800.0, 608.0),
+
+            resizable: bool = false,
 
             /// Sets whether the window is initially visible.
             ///
@@ -80,4 +86,48 @@ impl WindowBuilder {
     pub fn build(&self) -> Result<Window, Error> {
         imp::make_window(self).map(|repr| Window(repr))
     }
+}
+
+/// Represents the availability of the minimize, maximize, and close buttons on a [`Window`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WindowControls {
+    pub minimize: bool,
+    pub maximize: bool,
+    pub close: bool,
+}
+
+impl WindowControls {
+    /// Creates window controls from the provided values.
+    pub const fn new(minimize: bool, maximize: bool, close: bool) -> Self {
+        Self {
+            minimize,
+            maximize,
+            close,
+        }
+    }
+
+    /// Creates window controls with all 3 buttons enabled.
+    pub const fn enabled() -> Self {
+        Self::new(true, true, true)
+    }
+
+    /// Creates window controls with the minimize & close buttons available.
+    pub const fn no_maximize() -> Self {
+        Self::new(true, false, true)
+    }
+}
+
+impl Default for WindowControls {
+    /// Default trait implementation, same as [`Controls::new`].
+    fn default() -> Self {
+        Self::enabled()
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct WindowStyle {
+    pub borderless: bool,
+    pub resizable: bool,
+    pub visible: bool,
+    pub controls: Option<WindowControls>,
 }
