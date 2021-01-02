@@ -123,11 +123,3 @@ impl Default for WindowControls {
         Self::enabled()
     }
 }
-
-#[derive(Default)]
-pub(crate) struct WindowStyle {
-    pub borderless: bool,
-    pub resizable: bool,
-    pub visible: bool,
-    pub controls: Option<WindowControls>,
-}

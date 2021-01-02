@@ -8,7 +8,7 @@ use crate::{
     error::Error,
     event::{CloseReason, Event},
     helpers::LazyCell,
-    window::{WindowBuilder, WindowControls, WindowImpl, WindowStyle},
+    window::{WindowBuilder, WindowControls, WindowImpl},
 };
 use std::{cell, fmt, mem, ops, ptr, thread};
 use std::sync::{Arc, Condvar, Mutex}; // move later
@@ -39,6 +39,7 @@ fn this_hinstance() -> HINSTANCE {
     (unsafe { &__ImageBase }) as *const [u8; 64] as HINSTANCE
 }
 
+// TODO: make sure this actually works
 unsafe fn error_string_repr(err: DWORD) -> String {
     // This cast is no mistake, the function wants `LPWSTR *`, and not `LPWSTR`
     let mut buffer: *mut WCHAR = ptr::null_mut();
@@ -184,31 +185,45 @@ struct WindowCreateParams {
     error_return: Option<Error>,
 }
 
+#[derive(Default, Clone)]
+struct WindowStyle {
+    pub borderless: bool,
+    pub resizable: bool,
+    pub visible: bool,
+    pub controls: Option<WindowControls>,
+}
+
 impl WindowStyle {
     /// Gets this style as a bitfield. Note that it does not include the close button.
     /// The close button is a menu property, not a window style.
-    pub fn as_bitfield(&self) -> DWORD {
-        let mut style = if self.borderless {
-            WS_POPUP
+    pub fn dword_style(&self) -> DWORD {
+        let mut style = 0;
+
+        if self.borderless {
+            // TODO: Why does this just not work without THICKFRAME? Borderless is dumb.
+            style |= WS_POPUP | WS_THICKFRAME;
         } else {
-            let mut style = WS_OVERLAPPED | WS_BORDER | WS_CAPTION;
-            if self.resizable {
-                style |= WS_THICKFRAME;
-            }
-            if let Some(controls) = &self.controls {
-                if controls.minimize {
-                    style |= WS_MINIMIZEBOX;
-                }
-                if controls.maximize {
-                    style |= WS_MAXIMIZEBOX;
-                }
-                style |= WS_SYSMENU;
-            }
-            style
-        };
+            style |= WS_OVERLAPPED | WS_BORDER | WS_CAPTION;
+        }
+
+        if self.resizable {
+            style |= WS_THICKFRAME;
+        }
+
         if self.visible {
             style |= WS_VISIBLE;
         }
+
+        if let Some(controls) = &self.controls {
+            if controls.minimize {
+                style |= WS_MINIMIZEBOX;
+            }
+            if controls.maximize {
+                style |= WS_MAXIMIZEBOX;
+            }
+            style |= WS_SYSMENU;
+        }
+
         style
     }
 }
@@ -345,19 +360,25 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
             controls: builder.controls.clone(),
         };
 
-        let style = window_style.as_bitfield();
+        let style = window_style.dword_style();
         let style_ex = 0;
 
         let width = 1280;
         let height = 720;
-        let mut title = Vec::new();
         let user_data: Box<cell::UnsafeCell<WindowUserData>> = Default::default();
 
         let builder_ptr = (&builder) as *const WindowBuilder;
         let user_data_ptr = user_data.as_ref().get();
-        let mut params = WindowCreateParams { builder_ptr, user_data_ptr, error_return: None };
+        (&mut *user_data_ptr).window_style = window_style;
+        let mut params = WindowCreateParams {
+            builder_ptr,
+            user_data_ptr,
+
+            error_return: None,
+        };
 
         // Creates the window - this waits for `WM_NCCREATE` & `WM_CREATE` to return (in that order)
+        let mut title = Vec::new();
         let hwnd = CreateWindowExW(
             style_ex,
             class_name,
@@ -401,7 +422,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         // Release condvar + mutex pair so the `Arc` contents are deallocated once the outer fn returns
         mem::drop(cond_pair);
 
-        // Free unused buffers
+        // Free unused wide string buffers
         mem::drop(class_name_buf);
         mem::drop(title);
 
