@@ -8,7 +8,7 @@ use crate::{
     error::Error,
     event::{CloseReason, Event},
     helpers::{LazyCell, sync::{condvar_notify1, condvar_wait, mutex_lock, Condvar, Mutex}},
-    window::{WindowBuilder, WindowControls, WindowImpl},
+    window::{WindowBuilder, WindowControls, WindowImpl, WindowStyle},
 };
 use std::{cell, fmt, mem, ops, ptr, sync, thread};
 
@@ -184,14 +184,6 @@ struct WindowCreateParams {
     error_return: Option<Error>,
 }
 
-#[derive(Default, Clone)]
-struct WindowStyle {
-    pub borderless: bool,
-    pub resizable: bool,
-    pub visible: bool,
-    pub controls: Option<WindowControls>,
-}
-
 impl WindowStyle {
     /// Gets this style as a bitfield. Note that it does not include the close button.
     /// The close button is a menu property, not a window style.
@@ -318,14 +310,14 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
     let builder = builder.clone();
     let cond_pair = sync::Arc::clone(&signal);
     let thread_builder = thread::Builder::new()
-        .name(format!("Window Thread (Class \"{}\")", builder.__class_name.as_ref()));
+        .name(format!("Window Thread (Class \"{}\")", builder.class_name.as_ref()));
     let window_thread = thread_builder.spawn(move || unsafe {
         // TODO: Sanitize reserved window classes
         let mut class_info = mem::MaybeUninit::<WNDCLASSEXW>::uninit();
         (&mut *class_info.as_mut_ptr()).cbSize = mem::size_of_val(&class_info) as DWORD;
 
         let mut class_name_buf = Vec::new();
-        let class_name = str_to_wide_null(builder.__class_name.as_ref(), &mut class_name_buf);
+        let class_name = str_to_wide_null(builder.class_name.as_ref(), &mut class_name_buf);
 
         // Create the window class if it doesn't exist yet
         let class_registry_lock = mutex_lock(&*CLASS_REGISTRY_LOCK);
@@ -353,14 +345,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         }
         mem::drop(class_registry_lock);
 
-        let window_style = WindowStyle {
-            borderless: builder.borderless,
-            resizable: builder.resizable,
-            visible: builder.visible,
-            controls: builder.controls.clone(),
-        };
-
-        let style = window_style.dword_style();
+        let style = builder.style.dword_style();
         let style_ex = 0;
 
         let width = 1280;
@@ -369,7 +354,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
 
         let builder_ptr = (&builder) as *const WindowBuilder;
         let user_data_ptr = user_data.as_ref().get();
-        (&mut *user_data_ptr).window_style = window_style;
+        (&mut *user_data_ptr).window_style = builder.style.clone();
         let mut params = WindowCreateParams {
             builder_ptr,
             user_data_ptr,
@@ -382,7 +367,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         let hwnd = CreateWindowExW(
             style_ex,
             class_name,
-            str_to_wide_null(builder.__title.as_ref(), &mut title),
+            str_to_wide_null(builder.title.as_ref(), &mut title),
             style,
             CW_USEDEFAULT,
             CW_USEDEFAULT,

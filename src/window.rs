@@ -3,16 +3,28 @@
 use crate::{
     error::Error,
     event::Event,
-    helpers::{self, MaybeStatic},
+    helpers::MaybeStatic,
     monitor::{/*Point,*/ Size},
     platform::imp,
 };
+use std::borrow::Cow;
+
+/// Represents a window, of course.
+///
+/// To create a window, use a [`builder`](Window::builder).
+pub struct Window {
+    pub(crate) inner: imp::WindowRepr,
+}
+
+impl Window {
+    /// Constructs a [`WindowBuilder`] for instantiating windows.
+    pub const fn builder() -> WindowBuilder {
+        WindowBuilder::new()
+    }
+}
 
 gen_wrapper! {
-    /// Represents a window, of course.
-    ///
-    /// To create a window, use a [`builder`](Window::builder).
-    pub struct Window(WindowImpl : imp::WindowRepr) {
+    pub struct Window(WindowImpl @ inner) {
         self: {
             fn events(&self) -> &[Event];
             fn set_visible(&self, visible: bool) -> ();
@@ -24,67 +36,127 @@ gen_wrapper! {
     }
 }
 
-gen_builder! {
-    /// Builder for creating [`Window`] instances.
-    #[derive(Clone)]
-    pub struct WindowBuilder {
-        /// Constructs a new `WindowBuilder`.
-        ///
-        /// Prefer [`Window::builder`] for instantiation to avoid needing additional imports.
-        pub const fn new() -> Self {
-            borderless: bool = false,
-
-            controls: Option<WindowControls> = Some(WindowControls::no_maximize()),
-
-            /// Sets the inner size of the window.
-            ///
-            /// If the size is given in *logical* numbers,
-            /// DPI scaling is applied and will update dynamically.\
-            /// If the size is given in *physical* numbers,
-            /// no DPI scaling is done and it's used as an exact pixel value.
-            ///
-            /// Defaults to `Size::Logical(800.0, 608.0)`.
-            inner_size: Size = Size::Logical(800.0, 608.0),
-
-            resizable: bool = false,
-
-            /// Sets whether the window is initially visible.
-            ///
-            /// Defaults to `true`.
-            visible: bool = true,
-
-            // These members below have a wrapper for additional necessary checks.
-            // You may directly use `builder.__title(x)`, etc. to avoid checks & allocation.
-            #[doc(hidden)]
-            __class_name: MaybeStatic<str> = MaybeStatic::Static("ramen_window"),
-            #[doc(hidden)]
-            __title: MaybeStatic<str> = MaybeStatic::Static(""),
-        }
-    }
+/// Builder for creating [`Window`] instances.
+///
+/// To create a builder, use [`Window::builder`].
+#[derive(Clone)]
+pub struct WindowBuilder {
+    pub(crate) class_name: MaybeStatic<str>,
+    pub(crate) inner_size: Size,
+    pub(crate) style: WindowStyle,
+    pub(crate) title: MaybeStatic<str>,
 }
 
-impl Window {
-    /// Constructs a [`WindowBuilder`] for instantiating windows.
-    pub const fn builder() -> WindowBuilder {
-        WindowBuilder::new()
+impl WindowBuilder {
+    pub(crate) const fn new() -> Self {
+        Self {
+            class_name: MaybeStatic::Static("ramen_window_class"),
+            inner_size: Size::Logical(800.0, 608.0),
+            style: WindowStyle {
+                borderless: false,
+                controls: Some(WindowControls::no_maximize()),
+                resizable: true,
+                visible: true,
+            },
+            title: MaybeStatic::Static("a nice window"),
+        }
+    }
+
+    /// what do you think
+    pub fn build(&self) -> Result<Window, Error> {
+        imp::make_window(self).map(|inner| Window { inner })
     }
 }
 
 impl WindowBuilder {
+    /// Sets whether the window is initially without a border.
+    ///
+    /// Defaults to `false`.
+    pub fn borderless(&mut self, borderless: bool) -> &mut Self {
+        self.style.borderless = borderless;
+        self
+    }
+
+    /// Sets the platform-specific window class name.
+    ///
+    /// - Win32: `lpszClassName` in
+    /// [`WNDCLASSEXW`](https://docs.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-wndclassexw)
+    /// - TODO: Other platforms!
+    ///
+    /// Defaults to `"ramen_window_class"`.
+    pub fn class_name<T>(&mut self, class_name: T) -> &mut Self
+    where
+        T: Into<Cow<'static, str>>,
+    {
+        self.class_name = match class_name.into() {
+            Cow::Borrowed(x) => x.into(),
+            Cow::Owned(x) => MaybeStatic::Dynamic(x.into()),
+        };
+        self
+    }
+
+    /// Sets the initial window controls. `None` indicates that no controls are desired.
+    ///
+    /// Defaults to [`WindowControls::no_maximize`].
+    pub fn controls(&mut self, controls: Option<WindowControls>) -> &mut Self {
+        self.style.controls = controls;
+        self
+    }
+
+    /// Sets the initial inner size of the window.
+    ///
+    /// Defaults to `Size::Logical(800.0, 608.0)`.
+    // TODO: explain "if physical no scaling" etc
+    pub fn inner_size(&mut self, inner_size: Size) -> &mut Self {
+        self.inner_size = inner_size;
+        self
+    }
+
+    /// Sets whether the window is initially resizable.
+    ///
+    /// Defaults to `true`.
+    pub fn resizable(&mut self, resizable: bool) -> &mut Self {
+        self.style.resizable = resizable;
+        self
+    }
+
     /// Sets the initial window title.
     ///
-    /// Defaults to an empty string (blank).
-    pub fn title(&mut self, title: impl Into<String>) -> &mut Self {
-        let mut title = title.into();
-        helpers::str_filter_nulls(&mut title);
-        self.__title = MaybeStatic::Dynamic(title.into());
+    /// Defaults to `"a nice window"`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use ramen::window::Window;
+    ///
+    /// let mut builder = Window::builder()
+    ///     .title("Cool Window") // static reference, or
+    ///     .title(String::from("Cool Window")); // owned data
+    /// ```
+    pub fn title<T>(&mut self, title: T) -> &mut Self
+    where
+        T: Into<Cow<'static, str>>,
+    {
+        self.title = match title.into() {
+            Cow::Borrowed(x) => x.into(),
+            Cow::Owned(x) => MaybeStatic::Dynamic(x.into()),
+        };
+        self
+    }
+
+    /// Sets whether the window is initially visible.
+    ///
+    /// Defaults to `true`.
+    pub fn visible(&mut self, visible: bool) -> &mut Self {
+        self.style.visible = visible;
         self
     }
 }
 
-impl WindowBuilder {
-    pub fn build(&self) -> Result<Window, Error> {
-        imp::make_window(self).map(|repr| Window(repr))
+impl Default for WindowBuilder {
+    /// Identical to construction via [`Window::builder`].
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -118,8 +190,16 @@ impl WindowControls {
 }
 
 impl Default for WindowControls {
-    /// Default trait implementation, same as [`Controls::new`].
+    /// Default trait implementation, same as [`WindowControls::new`].
     fn default() -> Self {
         Self::enabled()
     }
+}
+
+#[derive(Default, Clone)]
+pub(crate) struct WindowStyle {
+    pub borderless: bool,
+    pub resizable: bool,
+    pub visible: bool,
+    pub controls: Option<WindowControls>,
 }
