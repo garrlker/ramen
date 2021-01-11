@@ -1,8 +1,9 @@
 //! Windows API specific implementations and API extensions.
 
-#[path = "bindings/win32.rs"]
-mod bindings;
-use self::bindings::*;
+pub(crate) mod api;
+pub(crate) mod util;
+
+use self::api::*;
 
 use crate::{
     error::Error,
@@ -15,9 +16,6 @@ use std::{cell, fmt, mem, ops, ptr, sync, thread};
 /// Global lock used to synchronize classes being registered or queried.
 static CLASS_REGISTRY_LOCK: LazyCell<Mutex<()>> = LazyCell::new(Default::default);
 
-/// Empty wide string (to point to)
-static EMPTY_WIDE_STRING: &[WCHAR] = &[0x00];
-
 /// The initial capacity of the `Vec<Event>` structures
 ///
 /// TODO: This should be bigger than normal if input is enabled
@@ -25,120 +23,6 @@ const EVENT_BUF_INITIAL_SIZE: usize = 512;
 
 // Custom events
 const RAMEN_WM_CLOSE: UINT = WM_USER + 0;
-
-/// Retrieves the base module HINSTANCE.
-#[inline]
-fn this_hinstance() -> HINSTANCE {
-    extern "system" {
-        // Microsoft's linkers provide a static HINSTANCE to not have to query it at runtime.
-        // Source: https://devblogs.microsoft.com/oldnewthing/20041025-00/?p=37483
-        // (I love you Raymond Chen)
-        static __ImageBase: [u8; 64];
-    }
-    (unsafe { &__ImageBase }) as *const [u8; 64] as HINSTANCE
-}
-
-// TODO: make sure this actually works
-unsafe fn error_string_repr(err: DWORD) -> String {
-    // This cast is no mistake, the function wants `LPWSTR *`, and not `LPWSTR`
-    let mut buffer: *mut WCHAR = ptr::null_mut();
-    let buf_ptr = (&mut buffer as *mut LPWSTR) as LPWSTR;
-
-    // Query error string
-    let char_count = FormatMessageW(
-        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-        ptr::null(),
-        err,
-        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT).into(),
-        buf_ptr,
-        0,
-        ptr::null_mut(),
-    );
-    debug_assert_ne!(char_count, 0);
-
-    // Convert to `String`, free allocated OS buffer
-    let mut message = Vec::new();
-    lpcwstr_to_str(buffer, &mut message);
-    LocalFree(buffer.cast());
-    String::from_utf8_lossy(&message).into_owned()
-}
-
-fn str_to_wide_null<'s, 'v>(s: &str, buffer: &mut Vec<WCHAR>) -> LPCWSTR {
-    // NOTE: Yes, indeed, `std::os::windows::ffi::OsStr(ing)ext` does exist in the standard library,
-    // but it requires you to fit your data in the OsStr(ing) model and it's not hyper optimized
-    // unlike mb2wc with handwritten SSE (allegedly), alongside being the native conversion function
-
-    // MultiByteToWideChar can't actually handle 0 length because 0 return means error
-    if s.is_empty() {
-        return EMPTY_WIDE_STRING.as_ptr()
-    }
-
-    unsafe {
-        let lpcstr: LPCSTR = s.as_ptr().cast();
-        let str_len = s.len() as c_int;
-        debug_assert!(s.len() <= c_int::max_value() as usize, "string length overflows c_int");
-
-        // Calculate buffer size
-        let wchar_count = MultiByteToWideChar(
-            CP_UTF8, 0, lpcstr, str_len,
-            ptr::null_mut(), 0, // buffer == NULL means query size
-        ) as usize;
-        debug_assert_ne!(0, wchar_count, "error in MultiByteToWideChar");
-
-        // Preallocate enough space (including null terminator past end)
-        let wchar_count_null = wchar_count + 1;
-        buffer.clear();
-        buffer.reserve(wchar_count_null);
-
-        // Write to our buffer
-        let chars_written = MultiByteToWideChar(
-            CP_UTF8, 0, lpcstr, str_len,
-            buffer.as_mut_ptr(), wchar_count as c_int,
-        );
-        buffer.set_len(wchar_count);
-        debug_assert_eq!(wchar_count, chars_written as usize, "invalid char count received");
-
-        // Filter nulls, as Rust allows them in &str
-        for x in &mut *buffer {
-            if *x == 0x00 {
-                *x = b' ' as WCHAR; // 0x00 => Space
-            }
-        }
-
-        // Add null terminator & yield
-        *buffer.as_mut_ptr().add(wchar_count) = 0x00;
-        buffer.set_len(wchar_count_null);
-        buffer.as_ptr()
-    }
-}
-
-fn lpcwstr_to_str(s: LPCWSTR, buffer: &mut Vec<u8>) {
-    // This is more or less the inverse of `str_to_wide_null`, works the same way
-
-    buffer.clear();
-    unsafe {
-        // Zero-length strings can't be processed like in MB2WC because 0 == Error...
-        if *s == 0x00 {
-            return
-        }
-
-        // Calculate buffer size
-        let count = WideCharToMultiByte(
-            CP_UTF8, 0, s, -1, ptr::null_mut(),
-            0, ptr::null(), ptr::null_mut(),
-        );
-        debug_assert_ne!(count, 0, "failed to count wchars in wstr -> str");
-
-        // Preallocate required amount, decode to buffer
-        buffer.reserve(count as usize);
-        let res = WideCharToMultiByte(
-            CP_UTF8, 0, s, -1, buffer.as_mut_ptr(),
-            count, ptr::null(), ptr::null_mut(),
-        );
-        debug_assert_ne!(res, 0, "failure in wchar -> str");
-        buffer.set_len(count as usize - 1); // nulled input -> null in output
-    }
-}
 
 #[derive(Debug)]
 pub struct InternalError {
@@ -159,7 +43,7 @@ impl InternalError {
         Self {
             code,
             context,
-            message: unsafe { error_string_repr(code) },
+            message: unsafe { util::error_string_repr(code) },
         }
     }
 }
@@ -253,56 +137,6 @@ impl WindowImpl for Window {
     }
 }
 
-unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    unsafe fn user_data<'a>(hwnd: HWND) -> &'a mut WindowUserData {
-        &mut *(get_window_data(hwnd, GWLP_USERDATA) as *mut WindowUserData)
-    }
-
-    #[inline]
-    unsafe fn push_event(user_data: &mut WindowUserData, event: Event) {
-        let mut lock = mutex_lock(&user_data.event_queue);
-        lock.push(event);
-        mem::drop(lock);
-    }
-
-    match msg {
-        WM_DESTROY => {
-            PostQuitMessage(0);
-            0
-        },
-
-        WM_CLOSE => {
-            let user_data = user_data(hwnd);
-            let reason = user_data.close_reason.take().unwrap_or(CloseReason::Unknown);
-            push_event(user_data, Event::CloseRequest(reason));
-            0
-        },
-
-        WM_NCCREATE => {
-            // `lpCreateParams` is the first member, so `CREATESTRUCTW *` is `WindowCreateParams **`
-            let params = &mut **(lparam as *const *mut WindowCreateParams);
-
-            // Store user data pointer
-            set_window_data(hwnd, GWLP_USERDATA, params.user_data_ptr as usize);
-
-            DefWindowProcW(hwnd, msg, wparam, lparam)
-        },
-
-        WM_NCDESTROY => {
-            // finalize
-            DefWindowProcW(hwnd, msg, wparam, lparam)
-        },
-
-        // Custom event: Close the window, but for real (`WM_CLOSE` is rejected always).
-        RAMEN_WM_CLOSE => {
-            DestroyWindow(hwnd);
-            0
-        },
-
-        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
-    }
-}
-
 pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> {
     // Condvar & mutex pair for receiving the `Result<WindowRepr, Error>` from spawned thread
     let signal = sync::Arc::new((Mutex::<Option<Result<WindowRepr, Error>>>::new(None), Condvar::new()));
@@ -317,11 +151,11 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         (&mut *class_info.as_mut_ptr()).cbSize = mem::size_of_val(&class_info) as DWORD;
 
         let mut class_name_buf = Vec::new();
-        let class_name = str_to_wide_null(builder.class_name.as_ref(), &mut class_name_buf);
+        let class_name = util::str_to_wide_null(builder.class_name.as_ref(), &mut class_name_buf);
 
         // Create the window class if it doesn't exist yet
         let class_registry_lock = mutex_lock(&*CLASS_REGISTRY_LOCK);
-        if GetClassInfoExW(this_hinstance(), class_name, class_info.as_mut_ptr()) == 0 {
+        if GetClassInfoExW(util::this_hinstance(), class_name, class_info.as_mut_ptr()) == 0 {
             // The window class not existing sets the thread global error flag,
             // we clear it immediately to avoid any confusion down the line.
             SetLastError(ERROR_SUCCESS);
@@ -332,7 +166,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
             class.lpfnWndProc = window_proc;
             class.cbClsExtra = 0;
             class.cbWndExtra = 0;
-            class.hInstance = this_hinstance();
+            class.hInstance = util::this_hinstance();
             class.hIcon = ptr::null_mut();
             class.hCursor = ptr::null_mut();
             class.hbrBackground = ptr::null_mut();
@@ -367,7 +201,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         let hwnd = CreateWindowExW(
             style_ex,
             class_name,
-            str_to_wide_null(builder.title.as_ref(), &mut title),
+            util::str_to_wide_null(builder.title.as_ref(), &mut title),
             style,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -375,7 +209,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
             height,
             ptr::null_mut(),
             ptr::null_mut(),
-            this_hinstance(),
+            util::this_hinstance(),
             (&mut params) as *mut WindowCreateParams as LPVOID,
         );
 
@@ -444,6 +278,56 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         } else {
             condvar_wait(&condvar, &mut lock);
         }
+    }
+}
+
+unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe fn user_data<'a>(hwnd: HWND) -> &'a mut WindowUserData {
+        &mut *(get_window_data(hwnd, GWLP_USERDATA) as *mut WindowUserData)
+    }
+
+    #[inline]
+    unsafe fn push_event(user_data: &mut WindowUserData, event: Event) {
+        let mut lock = mutex_lock(&user_data.event_queue);
+        lock.push(event);
+        mem::drop(lock);
+    }
+
+    match msg {
+        WM_DESTROY => {
+            PostQuitMessage(0);
+            0
+        },
+
+        WM_CLOSE => {
+            let user_data = user_data(hwnd);
+            let reason = user_data.close_reason.take().unwrap_or(CloseReason::Unknown);
+            push_event(user_data, Event::CloseRequest(reason));
+            0
+        },
+
+        WM_NCCREATE => {
+            // `lpCreateParams` is the first member, so `CREATESTRUCTW *` is `WindowCreateParams **`
+            let params = &mut **(lparam as *const *mut WindowCreateParams);
+
+            // Store user data pointer
+            set_window_data(hwnd, GWLP_USERDATA, params.user_data_ptr as usize);
+
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        },
+
+        WM_NCDESTROY => {
+            // finalize
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        },
+
+        // Custom event: Close the window, but for real (`WM_CLOSE` is rejected always).
+        RAMEN_WM_CLOSE => {
+            DestroyWindow(hwnd);
+            0
+        },
+
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
 
