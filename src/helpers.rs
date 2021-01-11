@@ -200,3 +200,37 @@ pub(crate) fn str_filter_nulls(x: &mut String) {
         }
     }
 }
+
+/// Wrapper for working with both `std` and `parking_lot`.
+/// None of these functions should panic as they're used in FFI.
+#[cfg(not(feature = "parking-lot"))]
+pub(crate) mod sync {
+    pub use std::sync::{Condvar, Mutex, MutexGuard};
+    use std::{ptr, process};
+
+    #[inline]
+    pub fn condvar_notify1(cvar: &Condvar) {
+        cvar.notify_one();
+    }
+
+    #[inline]
+    pub fn condvar_wait<T>(cvar: &Condvar, guard: &mut MutexGuard<T>) {
+        // The signature in `std` is quite terrible and CONSUMES the guard
+        // We "move it out" for the duration of the wait
+        unsafe {
+            let guard_copy = ptr::read(guard);
+            let result = cvar.wait(guard_copy).unwrap_or_else(|_poi| {
+                eprintln!("Condvar's mutex was poisoned! This is a bug.");
+                process::exit(1);
+            });
+            ptr::write(guard, result);
+        }
+    }
+
+    pub fn mutex_lock<T>(mtx: &Mutex<T>) -> MutexGuard<T> {
+        mtx.lock().unwrap_or_else(|_poi| {
+            eprintln!("Mutex was poisoned! This is a bug.");
+            process::exit(1);
+        })
+    }
+}

@@ -7,11 +7,10 @@ use self::bindings::*;
 use crate::{
     error::Error,
     event::{CloseReason, Event},
-    helpers::LazyCell,
+    helpers::{LazyCell, sync::{condvar_notify1, condvar_wait, mutex_lock, Condvar, Mutex}},
     window::{WindowBuilder, WindowControls, WindowImpl},
 };
-use std::{cell, fmt, mem, ops, ptr, thread};
-use std::sync::{Arc, Condvar, Mutex}; // move later
+use std::{cell, fmt, mem, ops, ptr, sync, thread};
 
 /// Global lock used to synchronize classes being registered or queried.
 static CLASS_REGISTRY_LOCK: LazyCell<Mutex<()>> = LazyCell::new(Default::default);
@@ -255,7 +254,7 @@ impl WindowImpl for Window {
 
     fn swap_events(&mut self) {
         let user_data = unsafe { &mut *self.user_data.get() };
-        let mut vec_lock = user_data.event_queue.lock().unwrap();
+        let mut vec_lock = mutex_lock(&user_data.event_queue);
         mem::swap(&mut self.event_buffer, vec_lock.as_mut());
         vec_lock.clear();
         mem::drop(vec_lock);
@@ -269,7 +268,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
 
     #[inline]
     unsafe fn push_event(user_data: &mut WindowUserData, event: Event) {
-        let mut lock = user_data.event_queue.lock().unwrap();
+        let mut lock = mutex_lock(&user_data.event_queue);
         lock.push(event);
         mem::drop(lock);
     }
@@ -302,6 +301,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             DefWindowProcW(hwnd, msg, wparam, lparam)
         },
 
+        // Custom event: Close the window, but for real (`WM_CLOSE` is rejected always).
         RAMEN_WM_CLOSE => {
             DestroyWindow(hwnd);
             0
@@ -313,10 +313,10 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
 
 pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> {
     // Condvar & mutex pair for receiving the `Result<WindowRepr, Error>` from spawned thread
-    let signal = Arc::new((Mutex::<Option<Result<WindowRepr, Error>>>::new(None), Condvar::new()));
+    let signal = sync::Arc::new((Mutex::<Option<Result<WindowRepr, Error>>>::new(None), Condvar::new()));
 
     let builder = builder.clone();
-    let cond_pair = Arc::clone(&signal);
+    let cond_pair = sync::Arc::clone(&signal);
     let thread_builder = thread::Builder::new()
         .name(format!("Window Thread (Class \"{}\")", builder.__class_name.as_ref()));
     let window_thread = thread_builder.spawn(move || unsafe {
@@ -328,7 +328,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         let class_name = str_to_wide_null(builder.__class_name.as_ref(), &mut class_name_buf);
 
         // Create the window class if it doesn't exist yet
-        let class_registry_lock = CLASS_REGISTRY_LOCK.lock().unwrap();
+        let class_registry_lock = mutex_lock(&*CLASS_REGISTRY_LOCK);
         if GetClassInfoExW(this_hinstance(), class_name, class_info.as_mut_ptr()) == 0 {
             // The window class not existing sets the thread global error flag,
             // we clear it immediately to avoid any confusion down the line.
@@ -406,7 +406,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         // NOTE: For future developments, do not insert panics before this,
         // or the waiting condvar never gets anything and thus the outer fn never returns
         let (mutex, condvar) = &*cond_pair;
-        let mut lock = mutex.lock().unwrap();
+        let mut lock = mutex_lock(&mutex);
         *lock = Some(match params.error_return {
             Some(err) => Err(err),
             None => Ok(Window {
@@ -416,7 +416,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
                 event_buffer: Vec::with_capacity(EVENT_BUF_INITIAL_SIZE),
             }),
         });
-        condvar.notify_one();
+        condvar_notify1(&condvar);
         mem::drop(lock);
 
         // Release condvar + mutex pair so the `Arc` contents are deallocated once the outer fn returns
@@ -449,15 +449,15 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
 
     // Wait until the thread is done creating the window or notifying us why it couldn't do that
     let (mutex, condvar) = &*signal;
-    let mut lock = mutex.lock().unwrap();
+    let mut lock = mutex_lock(&mutex);
     loop {
-        if let Some(result) = lock.take() {
+        if let Some(result) = (&mut *lock).take() {
             break result.map(|mut window| {
                 window.thread = Some(window_thread);
                 window
             })
         } else {
-            lock = condvar.wait(lock).unwrap();
+            condvar_wait(&condvar, &mut lock);
         }
     }
 }
