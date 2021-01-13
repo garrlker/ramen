@@ -1,5 +1,5 @@
 use super::api::*;
-use std::ptr;
+use std::{ptr, slice};
 
 /// Empty wide string (to point to)
 pub static WSTR_EMPTY: &[WCHAR] = &[0x00];
@@ -41,79 +41,76 @@ pub unsafe fn error_string_repr(err: DWORD) -> String {
     String::from_utf8_lossy(&message).into_owned()
 }
 
-pub fn str_to_wide_null<'s, 'v>(s: &str, buffer: &mut Vec<WCHAR>) -> LPCWSTR {
+pub fn str_to_wide_null(src: &str, buffer: &mut Vec<WCHAR>) -> LPCWSTR {
     // NOTE: Yes, indeed, `std::os::windows::ffi::OsStr(ing)ext` does exist in the standard library,
     // but it requires you to fit your data in the OsStr(ing) model and it's not hyper optimized
     // unlike mb2wc with handwritten SSE (allegedly), alongside being the native conversion function
 
     // MultiByteToWideChar can't actually handle 0 length because 0 return means error
-    if s.is_empty() {
+    if src.is_empty() || src.len() > c_int::max_value() as usize {
         return WSTR_EMPTY.as_ptr()
     }
 
     unsafe {
-        let lpcstr: LPCSTR = s.as_ptr().cast();
-        let str_len = s.len() as c_int;
-        debug_assert!(s.len() <= c_int::max_value() as usize, "string length overflows c_int");
+        let str_ptr: LPCSTR = src.as_ptr().cast();
+        let str_len = src.len() as c_int;
 
         // Calculate buffer size
-        let wchar_count = MultiByteToWideChar(
-            CP_UTF8, 0, lpcstr, str_len,
-            ptr::null_mut(), 0, // buffer == NULL means query size
-        ) as usize;
-        debug_assert_ne!(0, wchar_count, "error in MultiByteToWideChar");
+        let req_buffer_size = MultiByteToWideChar(
+            CP_UTF8, 0,
+            str_ptr, str_len,
+            ptr::null_mut(), 0, // `lpWideCharStr == NULL` means query size
+        ) as usize + 1; // +1 for null terminator
 
-        // Preallocate enough space (including null terminator past end)
-        let wchar_count_null = wchar_count + 1;
+        // Ensure buffer capacity
         buffer.clear();
-        buffer.reserve(wchar_count_null);
+        buffer.reserve(req_buffer_size);
 
         // Write to our buffer
         let chars_written = MultiByteToWideChar(
-            CP_UTF8, 0, lpcstr, str_len,
-            buffer.as_mut_ptr(), wchar_count as c_int,
-        );
-        buffer.set_len(wchar_count);
-        debug_assert_eq!(wchar_count, chars_written as usize, "invalid char count received");
+            CP_UTF8, 0,
+            str_ptr, str_len,
+            buffer.as_mut_ptr(), req_buffer_size as c_int,
+        ) as usize;
 
         // Filter nulls, as Rust allows them in &str
-        for x in &mut *buffer {
+        for x in slice::from_raw_parts_mut(buffer.as_mut_ptr(), chars_written) {
             if *x == 0x00 {
                 *x = b' ' as WCHAR; // 0x00 => Space
             }
         }
 
         // Add null terminator & yield
-        *buffer.as_mut_ptr().add(wchar_count) = 0x00;
-        buffer.set_len(wchar_count_null);
+        *buffer.as_mut_ptr().add(chars_written) = 0x00;
+        buffer.set_len(req_buffer_size);
         buffer.as_ptr()
     }
 }
 
-pub fn lpcwstr_to_str(s: LPCWSTR, buffer: &mut Vec<u8>) {
+pub fn lpcwstr_to_str(src: LPCWSTR, buffer: &mut Vec<u8>) {
     // This is more or less the inverse of `str_to_wide_null`, works the same way
 
     buffer.clear();
     unsafe {
         // Zero-length strings can't be processed like in MB2WC because 0 == Error...
-        if *s == 0x00 {
+        if *src == 0x00 {
             return
         }
 
         // Calculate buffer size
         let count = WideCharToMultiByte(
-            CP_UTF8, 0, s, -1, ptr::null_mut(),
+            CP_UTF8, 0,
+            src, -1, ptr::null_mut(),
             0, ptr::null(), ptr::null_mut(),
         );
-        debug_assert_ne!(count, 0, "failed to count wchars in wstr -> str");
 
         // Preallocate required amount, decode to buffer
         buffer.reserve(count as usize);
-        let res = WideCharToMultiByte(
-            CP_UTF8, 0, s, -1, buffer.as_mut_ptr(),
+        let _ = WideCharToMultiByte(
+            CP_UTF8, 0,
+            src, -1, buffer.as_mut_ptr(),
             count, ptr::null(), ptr::null_mut(),
         );
-        debug_assert_ne!(res, 0, "failure in wchar -> str");
         buffer.set_len(count as usize - 1); // nulled input -> null in output
     }
 }
