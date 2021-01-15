@@ -22,7 +22,8 @@ static CLASS_REGISTRY_LOCK: LazyCell<Mutex<()>> = LazyCell::new(Default::default
 const EVENT_BUF_INITIAL_SIZE: usize = 512;
 
 // Custom events
-const RAMEN_WM_CLOSE: UINT = WM_USER + 0;
+const RAMEN_WM_EXECUTE: UINT = WM_USER + 0;
+const RAMEN_WM_CLOSE: UINT = WM_USER + 1;
 
 #[derive(Debug)]
 pub struct InternalError {
@@ -138,6 +139,21 @@ impl WindowImpl for Window {
         mem::swap(&mut self.event_buffer, vec_lock.as_mut());
         vec_lock.clear();
         mem::drop(vec_lock);
+    }
+}
+
+impl Window {
+    pub(crate) fn execute<'a, 'b>(&'a self, ctx: &'b window::Window, f: Box<dyn FnOnce(&'b window::Window)>) {
+        let wrap = Box::new(f);
+        assert_eq!(mem::size_of_val(&wrap), mem::size_of::<WPARAM>());
+        unsafe {
+            SendMessageW(
+                self.hwnd,
+                RAMEN_WM_EXECUTE,
+                Box::into_raw(wrap) as WPARAM,
+                ctx as *const _ as LPARAM,
+            );
+        }
     }
 }
 
@@ -323,6 +339,14 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
         WM_NCDESTROY => {
             // finalize
             DefWindowProcW(hwnd, msg, wparam, lparam)
+        },
+
+        // Custom event: Run arbitrary functions.
+        RAMEN_WM_EXECUTE => {
+            // TODO: Before release, test if any blocking functions in here can deadlock.
+            let f = Box::from_raw(wparam as *mut Box<dyn FnOnce(&window::Window)>);
+            f(&*(lparam as *const window::Window));
+            0
         },
 
         // Custom event: Close the window, but for real (`WM_CLOSE` is rejected always).

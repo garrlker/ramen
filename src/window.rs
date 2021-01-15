@@ -36,6 +36,16 @@ gen_wrapper! {
     }
 }
 
+impl Window {
+    #[inline]
+    pub fn execute<'a, F>(&'a self, f: F)
+    where
+        F: FnOnce(&'a Window) + 'static,
+    {
+        self.inner.execute(self, Box::new(f))
+    }
+}
+
 /// Builder for creating [`Window`] instances.
 ///
 /// To create a builder, use [`Window::builder`].
