@@ -1,5 +1,6 @@
 //! the event api
 
+#[derive(Copy, Clone)]
 pub enum Event {
     CloseRequest(CloseReason),
 }
