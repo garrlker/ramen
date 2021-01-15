@@ -16,6 +16,13 @@ pub struct Window {
     pub(crate) inner: imp::WindowRepr,
 }
 
+pub(crate) trait WindowImpl {
+    fn events(&self) -> &[Event];
+    fn execute(&self, f: Box<dyn FnOnce(&Window)>, inst: &Window);
+    fn set_visible(&self, visible: bool);
+    fn swap_events(&mut self);
+}
+
 impl Window {
     /// Constructs a [`WindowBuilder`] for instantiating windows.
     pub const fn builder() -> WindowBuilder {
@@ -23,26 +30,28 @@ impl Window {
     }
 }
 
-gen_wrapper! {
-    pub struct Window(WindowImpl @ inner) {
-        self: {
-            fn events(&self) -> &[Event];
-            fn set_visible(&self, visible: bool) -> ();
-        }
-
-        mut self: {
-            fn swap_events(&mut self) -> ();
-        }
-    }
-}
-
 impl Window {
     #[inline]
-    pub fn execute<'a, F>(&'a self, f: F)
+    pub fn events(&self) -> &[Event] {
+        self.inner.events()
+    }
+
+    #[inline]
+    pub fn execute<'a, F>(&self, f: F)
     where
-        F: FnOnce(&'a Window) + 'static,
+        F: FnOnce(&Window) + 'static,
     {
-        self.inner.execute(self, Box::new(f))
+        self.inner.execute(Box::new(f), self);
+    }
+
+    #[inline]
+    pub fn set_visible(&self, visible: bool) {
+        self.inner.set_visible(visible);
+    }
+
+    #[inline]
+    pub fn swap_events(&mut self) {
+        self.inner.swap_events();
     }
 }
 

@@ -17,78 +17,6 @@ macro_rules! document {
     };
 }
 
-/// Simple builder generator.
-macro_rules! gen_builder {
-    (
-        $(#[$outer:meta])*
-        $t_vis:vis struct $t_ident:ident {
-            $(#[$inner:meta])*
-            pub const fn new() -> Self {
-                $($(#[$member_meta:meta])* $name:ident : $ty:ty = $def:expr),* $(,)?
-            }
-        }
-    ) => {
-        $(#[$outer])*
-        $t_vis struct $t_ident {
-            $($(#[$member_meta])* pub(crate) $name : $ty,)*
-        }
-        impl $t_ident {
-            $(#[$inner])*
-            pub const fn new() -> Self {
-                Self {
-                    $($(#[$member_meta])* $name : $def,)*
-                }
-            }
-            $($(#[$member_meta])* #[inline]
-            pub fn $name(&mut self, $name : $ty) -> &mut Self {
-                self.$name = $name; self
-            })*
-        }
-        impl Default for $t_ident {
-            /// Default trait implementation, identical to construction via [`new`](Self::new).
-            fn default() -> Self {
-                Self::new()
-            }
-        }
-    };
-}
-
-/// Trait wrapper generator.
-macro_rules! gen_wrapper {
-    (
-        $s_vis:vis struct $s_ident:ident($dyn_ident:ident @ $member:ident) {
-            $(self: {$(
-                $(#[$fn_outer:meta])*
-                fn $fn_name:ident(&self      $(, $name:ident : $ty:ty)*   $(,)?) -> $ret:ty;
-            )*})? $(,)?
-
-            $(mut self: {$(
-                $(#[$fn_outer2:meta])*
-                fn $fn_name2:ident(&mut self $(, $name2:ident : $ty2:ty)* $(,)?) -> $ret2:ty;
-            )*})? $(,)?
-        }
-    ) => {
-        pub(crate) trait $dyn_ident {
-            $($($(#[$fn_outer] )* fn $fn_name (&self     $(, $name  : $ty )*)   -> $ret;  )*)*
-            $($($(#[$fn_outer2])* fn $fn_name2(&mut self $(, $name2 : $ty2)*)   -> $ret2; )*)*
-        }
-        impl $s_ident {
-            $($(
-                $(#[$fn_outer])* #[inline]
-                pub fn $fn_name(&self, $($name : $ty ,)*) -> $ret {
-                    self.$member.$fn_name($($name,)*)
-                }
-            )*)*
-            $($(
-                $(#[$fn_outer2])* #[inline]
-                pub fn $fn_name2(&mut self, $($name2 : $ty2 ,)*) -> $ret2 {
-                    self.$member.$fn_name2($($name2,)*)
-                }
-            )*)*
-        }
-    };
-}
-
 /// Used to const initialize fields which don't necessarily need allocation (ex. str).
 pub enum MaybeStatic<T: ?Sized + 'static> {
     Static(&'static T),
@@ -187,7 +115,7 @@ impl<T, F: FnOnce() -> T> Deref for LazyCell<T, F> {
 /// but the native C APIs we have to interact with see it as a null *terminator*.
 ///
 /// This function replaces all instances of null in a string with b' ' (space).
-pub(crate) fn str_filter_nulls(x: &mut String) {
+pub(crate) fn _str_filter_nulls(x: &mut String) {
     // Safety: 0x00 and b' ' are one-byte sequences that can't mean anything else in UTF-8.
     unsafe {
         for byte in x.as_mut_vec() {

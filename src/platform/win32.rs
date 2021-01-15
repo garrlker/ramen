@@ -9,7 +9,7 @@ use crate::{
     error::Error,
     event::{CloseReason, Event},
     helpers::{LazyCell, sync::{condvar_notify1, condvar_wait, mutex_lock, Condvar, Mutex}},
-    window::{self, WindowBuilder, WindowControls, WindowImpl, WindowStyle},
+    window::{self, WindowBuilder, WindowImpl, WindowStyle},
 };
 use std::{cell, fmt, mem, ops, ptr, sync, thread};
 
@@ -126,6 +126,19 @@ impl WindowImpl for Window {
         self.event_buffer.as_slice()
     }
 
+    fn execute(&self, f: Box<dyn FnOnce(&window::Window)>, inst: &window::Window) {
+        let wrap = Box::new(f);
+        assert_eq!(mem::size_of_val(&wrap), mem::size_of::<WPARAM>());
+        unsafe {
+            SendMessageW(
+                self.hwnd,
+                RAMEN_WM_EXECUTE,
+                Box::into_raw(wrap) as WPARAM,
+                inst as *const _ as LPARAM,
+            );
+        }
+    }
+
     #[inline]
     fn set_visible(&self, visible: bool) {
         unsafe {
@@ -139,21 +152,6 @@ impl WindowImpl for Window {
         mem::swap(&mut self.event_buffer, vec_lock.as_mut());
         vec_lock.clear();
         mem::drop(vec_lock);
-    }
-}
-
-impl Window {
-    pub(crate) fn execute<'a, 'b>(&'a self, ctx: &'b window::Window, f: Box<dyn FnOnce(&'b window::Window)>) {
-        let wrap = Box::new(f);
-        assert_eq!(mem::size_of_val(&wrap), mem::size_of::<WPARAM>());
-        unsafe {
-            SendMessageW(
-                self.hwnd,
-                RAMEN_WM_EXECUTE,
-                Box::into_raw(wrap) as WPARAM,
-                ctx as *const _ as LPARAM,
-            );
-        }
     }
 }
 
