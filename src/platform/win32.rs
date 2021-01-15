@@ -9,7 +9,7 @@ use crate::{
     error::Error,
     event::{CloseReason, Event},
     helpers::{LazyCell, sync::{condvar_notify1, condvar_wait, mutex_lock, Condvar, Mutex}},
-    window::{self, WindowBuilder, WindowImpl, WindowStyle},
+    window::{WindowBuilder, WindowImpl, WindowStyle},
 };
 use std::{cell, fmt, mem, ops, ptr, sync, thread};
 
@@ -126,15 +126,15 @@ impl WindowImpl for Window {
         self.event_buffer.as_slice()
     }
 
-    fn execute(&self, f: Box<dyn FnOnce(&window::Window)>, inst: &window::Window) {
-        let wrap = Box::new(f);
+    fn execute(&self, mut f: &mut dyn FnMut()) {
+        let wrap: *mut &mut dyn FnMut() = (&mut f) as *mut _;
         assert_eq!(mem::size_of_val(&wrap), mem::size_of::<WPARAM>());
         unsafe {
             SendMessageW(
                 self.hwnd,
                 RAMEN_WM_EXECUTE,
-                Box::into_raw(wrap) as WPARAM,
-                inst as *const _ as LPARAM,
+                wrap as WPARAM,
+                0,
             );
         }
     }
@@ -338,6 +338,8 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             // Store user data pointer
             set_window_data(hwnd, GWLP_USERDATA, params.user_data_ptr as usize);
 
+            let _ = params.builder_ptr;
+
             DefWindowProcW(hwnd, msg, wparam, lparam)
         },
 
@@ -349,8 +351,8 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
         // Custom event: Run arbitrary functions.
         RAMEN_WM_EXECUTE => {
             // TODO: Before release, test if any blocking functions in here can deadlock.
-            let f = Box::from_raw(wparam as *mut Box<dyn FnOnce(&window::Window)>);
-            f(&*(lparam as *const window::Window));
+            let f = wparam as *mut &mut (dyn FnMut());
+            (*f)();
             0
         },
 

@@ -18,7 +18,7 @@ pub struct Window {
 
 pub(crate) trait WindowImpl {
     fn events(&self) -> &[Event];
-    fn execute(&self, f: Box<dyn FnOnce(&Window)>, inst: &Window);
+    fn execute(&self, f: &mut dyn FnMut());
     fn set_visible(&self, visible: bool);
     fn set_visible_async(&self, visible: bool);
     fn swap_events(&mut self);
@@ -65,11 +65,11 @@ impl Window {
     /// });
     /// ```
     #[inline]
-    pub fn execute<F>(&self, f: F)
+    pub fn execute<F>(&self, mut f: F)
     where
-        F: FnOnce(&Window) + 'static,
+        F: FnMut(&Self) + Send,
     {
-        self.inner.execute(Box::new(f), self);
+        self.inner.execute(&mut move || f(self));
     }
 
     /// Sets whether the window is visible or hidden.
