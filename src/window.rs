@@ -31,24 +31,56 @@ impl Window {
 }
 
 impl Window {
+    /// Gets the current event buffer. Events are in the order they were received.
+    ///
+    /// To acquire new events, call [`swap_events`](Self::swap_events);
+    /// repeated calls to this function will not advance the buffer.
+    ///
+    /// ```rust
+    /// loop {
+    ///     for event in window.events() {
+    ///         // process events!
+    ///     }
+    ///
+    ///     // acquire new events
+    ///     window.swap_events();
+    /// }
+    /// ```
     #[inline]
     pub fn events(&self) -> &[Event] {
         self.inner.events()
     }
 
+    /// Executes an arbitrary function in the window thread, blocking until it returns.
+    ///
+    /// This is **not** how functions such as [`set_visible`](Self::set_visible) are implemented,
+    /// but rather a way to guarantee that native low-level calls are executed in the remote thread if necessary,
+    /// especially on platforms like Win32 that make excessive use of thread globals.
+    ///
+    /// ```rust
+    /// window.execute(|window| {
+    ///     println!("Hello from the window thread!");
+    ///     window.set_title("hi"); // window accessible
+    /// });
+    /// ```
     #[inline]
-    pub fn execute<'a, F>(&self, f: F)
+    pub fn execute<F>(&self, f: F)
     where
         F: FnOnce(&Window) + 'static,
     {
         self.inner.execute(Box::new(f), self);
     }
 
+    /// Sets whether the window is visible or hidden.
     #[inline]
     pub fn set_visible(&self, visible: bool) {
         self.inner.set_visible(visible);
     }
 
+    /// Acquires events that have occured since the last call to [`swap_events`](Self::swap_events), if ever.
+    ///
+    /// The buffer containing those events is accessible via
+    /// [`events`](Self::events) - see that function for more information.
     #[inline]
     pub fn swap_events(&mut self) {
         self.inner.swap_events();
