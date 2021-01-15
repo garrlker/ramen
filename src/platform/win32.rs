@@ -146,6 +146,13 @@ impl WindowImpl for Window {
         }
     }
 
+    #[inline]
+    fn set_visible_async(&self, visible: bool) {
+        unsafe {
+            ShowWindowAsync(self.hwnd, if visible { SW_SHOW } else { SW_HIDE });
+        }
+    }
+
     fn swap_events(&mut self) {
         let user_data = unsafe { &mut *self.user_data.get() };
         let mut vec_lock = mutex_lock(&user_data.event_queue);

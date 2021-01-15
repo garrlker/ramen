@@ -20,6 +20,7 @@ pub(crate) trait WindowImpl {
     fn events(&self) -> &[Event];
     fn execute(&self, f: Box<dyn FnOnce(&Window)>, inst: &Window);
     fn set_visible(&self, visible: bool);
+    fn set_visible_async(&self, visible: bool);
     fn swap_events(&mut self);
 }
 
@@ -75,6 +76,12 @@ impl Window {
     #[inline]
     pub fn set_visible(&self, visible: bool) {
         self.inner.set_visible(visible);
+    }
+
+    /// Non-blocking variant of [`set_visible`](Self::set_visible).
+    #[inline]
+    pub fn set_visible_async(&self, visible: bool) {
+        self.inner.set_visible_async(visible);
     }
 
     /// Acquires events that have occured since the last call to [`swap_events`](Self::swap_events), if ever.
