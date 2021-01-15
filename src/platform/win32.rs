@@ -9,7 +9,7 @@ use crate::{
     error::Error,
     event::{CloseReason, Event},
     helpers::{LazyCell, sync::{condvar_notify1, condvar_wait, mutex_lock, Condvar, Mutex}},
-    window::{WindowBuilder, WindowControls, WindowImpl, WindowStyle},
+    window::{self, WindowBuilder, WindowControls, WindowImpl, WindowStyle},
 };
 use std::{cell, fmt, mem, ops, ptr, sync, thread};
 
@@ -120,12 +120,16 @@ impl Default for WindowUserData {
 }
 
 impl WindowImpl for Window {
+    #[inline]
     fn events(&self) -> &[Event] {
         self.event_buffer.as_slice()
     }
 
+    #[inline]
     fn set_visible(&self, visible: bool) {
-        let _ = visible;
+        unsafe {
+            ShowWindow(self.hwnd, if visible { SW_SHOW } else { SW_HIDE });
+        }
     }
 
     fn swap_events(&mut self) {

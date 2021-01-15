@@ -82,6 +82,8 @@ pub const FORMAT_MESSAGE_IGNORE_INSERTS: DWORD = 0x00000200;
 pub const GWLP_USERDATA: c_int = -21;
 pub const LANG_NEUTRAL: USHORT = 0x00;
 pub const SUBLANG_DEFAULT: USHORT = 0x01;
+pub const SW_HIDE: c_int = 0;
+pub const SW_SHOW: c_int = 5;
 pub const WM_CREATE: UINT = 0x0001;
 pub const WM_DESTROY: UINT = 0x0002;
 pub const WM_CLOSE: UINT = 0x0010;
@@ -219,6 +221,10 @@ extern "system" {
     pub fn SendMessageW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT;
     pub fn DispatchMessageW(lpmsg: *const MSG) -> LRESULT;
     pub fn PostQuitMessage(nExitCode: c_int);
+
+    // Message loop utility
+    pub fn ShowWindow(hWnd: HWND, nCmdShow: c_int) -> BOOL;
+    pub fn ShowWindowAsync(hWnd: HWND, nCmdShow: c_int) -> BOOL;
 
     // Class/window storage manipulation
     pub fn GetClassLongW(hWnd: HWND, nIndex: c_int) -> DWORD;
