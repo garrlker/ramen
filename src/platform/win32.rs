@@ -130,7 +130,7 @@ impl WindowImpl for Window {
         let wrap: *mut &mut dyn FnMut() = (&mut f) as *mut _;
         assert_eq!(mem::size_of_val(&wrap), mem::size_of::<WPARAM>());
         unsafe {
-            SendMessageW(
+            let _ = SendMessageW(
                 self.hwnd,
                 RAMEN_WM_EXECUTE,
                 wrap as WPARAM,
@@ -142,14 +142,14 @@ impl WindowImpl for Window {
     #[inline]
     fn set_visible(&self, visible: bool) {
         unsafe {
-            ShowWindow(self.hwnd, if visible { SW_SHOW } else { SW_HIDE });
+            let _ = ShowWindow(self.hwnd, if visible { SW_SHOW } else { SW_HIDE });
         }
     }
 
     #[inline]
     fn set_visible_async(&self, visible: bool) {
         unsafe {
-            ShowWindowAsync(self.hwnd, if visible { SW_SHOW } else { SW_HIDE });
+            let _ = ShowWindowAsync(self.hwnd, if visible { SW_SHOW } else { SW_HIDE });
         }
     }
 
@@ -200,7 +200,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
             class.hIconSm = ptr::null_mut();
 
             // The fields on `WNDCLASSEXW` are valid so this can't fail
-            RegisterClassExW(class);
+            let _ = RegisterClassExW(class);
         }
         mem::drop(class_registry_lock);
 
@@ -281,7 +281,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
                 0 => break 'message_loop,
                 _ => {
                     // Dispatch message to WindowProc
-                    DispatchMessageW(&msg);
+                    let _ = DispatchMessageW(&msg);
                 },
             }
         }
@@ -336,7 +336,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             let params = &mut **(lparam as *const *mut WindowCreateParams);
 
             // Store user data pointer
-            set_window_data(hwnd, GWLP_USERDATA, params.user_data_ptr as usize);
+            let _ = set_window_data(hwnd, GWLP_USERDATA, params.user_data_ptr as usize);
 
             let _ = params.builder_ptr;
 
@@ -351,6 +351,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
         // Custom event: Run arbitrary functions.
         RAMEN_WM_EXECUTE => {
             // TODO: Before release, test if any blocking functions in here can deadlock.
+            // It shouldn't actually be possible, but better safe than sorry.
             let f = wparam as *mut &mut (dyn FnMut());
             (*f)();
             0
@@ -358,7 +359,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
 
         // Custom event: Close the window, but for real (`WM_CLOSE` is rejected always).
         RAMEN_WM_CLOSE => {
-            DestroyWindow(hwnd);
+            let _ = DestroyWindow(hwnd);
             0
         },
 
@@ -369,7 +370,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
 impl ops::Drop for Window {
     fn drop(&mut self) {
         unsafe {
-            PostMessageW(self.hwnd, RAMEN_WM_CLOSE, 0, 0);
+            let _ = PostMessageW(self.hwnd, RAMEN_WM_CLOSE, 0, 0);
         }
         let _ = self.thread.take().map(thread::JoinHandle::join);
     }

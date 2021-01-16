@@ -37,7 +37,7 @@ pub unsafe fn error_string_repr(err: DWORD) -> String {
     // Convert to `String`, free allocated OS buffer
     let mut message = Vec::new();
     lpcwstr_to_str(buffer, &mut message);
-    LocalFree(buffer.cast());
+    let _ = LocalFree(buffer.cast());
     String::from_utf8_lossy(&message).into_owned()
 }
 

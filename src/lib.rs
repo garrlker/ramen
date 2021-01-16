@@ -1,5 +1,7 @@
 //! A neat windowing library.
 
+#![deny(unused_results)]
+
 #[doc(hidden)]
 #[macro_use]
 pub mod helpers;
