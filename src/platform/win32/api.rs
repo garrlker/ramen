@@ -256,34 +256,42 @@ extern "system" {
 // Unfortunately, their signatures do not match, so it's better to rewrap it like this.
 // Both LONG and LONG_PTR are equivalent to the size of usize on their respective targets.
 #[cfg(target_pointer_width = "32")]
+#[inline]
 pub unsafe fn get_class_data(hwnd: HWND, offset: c_int) -> usize {
     GetClassLongW(hwnd, offset) as usize
 }
 #[cfg(target_pointer_width = "64")]
+#[inline]
 pub unsafe fn get_class_data(hwnd: HWND, offset: c_int) -> usize {
     GetClassLongPtrW(hwnd, offset) as usize
 }
 #[cfg(target_pointer_width = "32")]
+#[inline]
 pub unsafe fn set_class_data(hwnd: HWND, offset: c_int, data: usize) -> usize {
     SetClassLongW(hwnd, offset, data as LONG) as usize
 }
 #[cfg(target_pointer_width = "64")]
+#[inline]
 pub unsafe fn set_class_data(hwnd: HWND, offset: c_int, data: usize) -> usize {
     SetClassLongPtrW(hwnd, offset, data as LONG_PTR) as usize
 }
 #[cfg(target_pointer_width = "32")]
+#[inline]
 pub unsafe fn get_window_data(hwnd: HWND, offset: c_int) -> usize {
     GetWindowLongW(hwnd, offset) as usize
 }
 #[cfg(target_pointer_width = "64")]
+#[inline]
 pub unsafe fn get_window_data(hwnd: HWND, offset: c_int) -> usize {
     GetWindowLongPtrW(hwnd, offset) as usize
 }
 #[cfg(target_pointer_width = "32")]
+#[inline]
 pub unsafe fn set_window_data(hwnd: HWND, offset: c_int, data: usize) -> usize {
     SetWindowLongW(hwnd, offset, data as LONG) as usize
 }
 #[cfg(target_pointer_width = "64")]
+#[inline]
 pub unsafe fn set_window_data(hwnd: HWND, offset: c_int, data: usize) -> usize {
     SetWindowLongPtrW(hwnd, offset, data as LONG_PTR) as usize
 }
