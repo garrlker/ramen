@@ -22,6 +22,7 @@ def_handle!("Opaque handle to a window.", HWND, HWND__);
 def_handle!(DPI_AWARENESS_CONTEXT, DPI_AWARENESS_CONTEXT__);
 def_handle!(HBRUSH, HBRUSH__);
 def_handle!(HDC, HDC__);
+def_handle!(HHOOK, HHOOK__);
 def_handle!(HICON, HICON__);
 def_handle!(HMENU, HMENU__);
 def_handle!(HMODULE, HMODULE__);
@@ -69,6 +70,7 @@ pub type WORD = c_ushort;
 pub type WPARAM = UINT_PTR;
 
 // Function typedefs
+pub type HOOKPROC = unsafe extern "system" fn(c_int, WPARAM, LPARAM) -> LRESULT;
 pub type WNDPROC = unsafe extern "system" fn(HWND, UINT, WPARAM, LPARAM) -> LRESULT;
 
 // Constants
@@ -79,11 +81,14 @@ pub const ERROR_SUCCESS: DWORD = 0; // lol
 pub const FORMAT_MESSAGE_ALLOCATE_BUFFER: DWORD = 0x00000100;
 pub const FORMAT_MESSAGE_FROM_SYSTEM: DWORD = 0x00001000;
 pub const FORMAT_MESSAGE_IGNORE_INSERTS: DWORD = 0x00000200;
+pub const GCL_CBCLSEXTRA: c_int = -20;
 pub const GWLP_USERDATA: c_int = -21;
+pub const HCBT_DESTROYWND: c_int = 4;
 pub const LANG_NEUTRAL: USHORT = 0x00;
 pub const SUBLANG_DEFAULT: USHORT = 0x01;
 pub const SW_HIDE: c_int = 0;
 pub const SW_SHOW: c_int = 5;
+pub const WH_CBT: c_int = 5;
 pub const WM_CREATE: UINT = 0x0001;
 pub const WM_DESTROY: UINT = 0x0002;
 pub const WM_CLOSE: UINT = 0x0010;
@@ -161,6 +166,7 @@ extern "system" {
     pub fn GetLastError() -> DWORD;
     pub fn SetLastError(dwErrCode: DWORD);
     pub fn ExitProcess(uExitCode: UINT);
+    pub fn GetCurrentThreadId() -> DWORD;
 
     pub fn LocalFree(hMem: HLOCAL) -> HLOCAL;
     pub fn FormatMessageW(
@@ -213,6 +219,11 @@ extern "system" {
         lpParam: LPVOID,
     ) -> HWND;
     pub fn DestroyWindow(hWnd: HWND) -> BOOL;
+
+    // Hooking API
+    pub fn CallNextHookEx(hhk: HHOOK, nCode: c_int, wParam: WPARAM, lParam: LPARAM) -> LRESULT;
+    pub fn SetWindowsHookExW(idHook: c_int, lpfn: HOOKPROC, hmod: HINSTANCE, dwThreadId: DWORD) -> HHOOK;
+    pub fn UnhookWindowsHookEx(hhk: HHOOK) -> BOOL;
 
     // Message loop
     pub fn DefWindowProcW(hWnd: HWND, Msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT;

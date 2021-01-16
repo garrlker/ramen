@@ -16,6 +16,9 @@ use std::{cell, fmt, mem, ops, ptr, sync, thread};
 /// Global lock used to synchronize classes being registered or queried.
 static CLASS_REGISTRY_LOCK: LazyCell<Mutex<()>> = LazyCell::new(Default::default);
 
+/// Marker to filter out implementation magic like `CicMarshalWndClass`
+const HOOKPROC_MARKER: &[u8; 4] = b"viri";
+
 /// The initial capacity of the `Vec<Event>` structures
 ///
 /// TODO: This should be bigger than normal if input is enabled
@@ -107,6 +110,7 @@ impl WindowStyle {
 struct WindowUserData {
     close_reason: Option<CloseReason>,
     event_queue: Mutex<Vec<Event>>,
+    destroy_flag: bool,
     window_style: WindowStyle,
 }
 
@@ -115,50 +119,9 @@ impl Default for WindowUserData {
         Self {
             close_reason: None,
             event_queue: Mutex::new(Vec::with_capacity(EVENT_BUF_INITIAL_SIZE)),
+            destroy_flag: false,
             window_style: Default::default(),
         }
-    }
-}
-
-impl WindowImpl for Window {
-    #[inline]
-    fn events(&self) -> &[Event] {
-        self.event_buffer.as_slice()
-    }
-
-    fn execute(&self, mut f: &mut dyn FnMut()) {
-        let wrap: *mut &mut dyn FnMut() = (&mut f) as *mut _;
-        assert_eq!(mem::size_of_val(&wrap), mem::size_of::<WPARAM>());
-        unsafe {
-            let _ = SendMessageW(
-                self.hwnd,
-                RAMEN_WM_EXECUTE,
-                wrap as WPARAM,
-                0,
-            );
-        }
-    }
-
-    #[inline]
-    fn set_visible(&self, visible: bool) {
-        unsafe {
-            let _ = ShowWindow(self.hwnd, if visible { SW_SHOW } else { SW_HIDE });
-        }
-    }
-
-    #[inline]
-    fn set_visible_async(&self, visible: bool) {
-        unsafe {
-            let _ = ShowWindowAsync(self.hwnd, if visible { SW_SHOW } else { SW_HIDE });
-        }
-    }
-
-    fn swap_events(&mut self) {
-        let user_data = unsafe { &mut *self.user_data.get() };
-        let mut vec_lock = mutex_lock(&user_data.event_queue);
-        mem::swap(&mut self.event_buffer, vec_lock.as_mut());
-        vec_lock.clear();
-        mem::drop(vec_lock);
     }
 }
 
@@ -180,6 +143,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
 
         // Create the window class if it doesn't exist yet
         let class_registry_lock = mutex_lock(&*CLASS_REGISTRY_LOCK);
+        let mut class_created_here = false; // did this thread create the class?
         if GetClassInfoExW(util::this_hinstance(), class_name, class_info.as_mut_ptr()) == 0 {
             // The window class not existing sets the thread global error flag,
             // we clear it immediately to avoid any confusion down the line.
@@ -189,7 +153,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
             let class = &mut *class_info.as_mut_ptr();
             class.style = CS_OWNDC;
             class.lpfnWndProc = window_proc;
-            class.cbClsExtra = 0;
+            class.cbClsExtra = mem::size_of::<usize>() as c_int;
             class.cbWndExtra = 0;
             class.hInstance = util::this_hinstance();
             class.hIcon = ptr::null_mut();
@@ -201,6 +165,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
 
             // The fields on `WNDCLASSEXW` are valid so this can't fail
             let _ = RegisterClassExW(class);
+            class_created_here = true;
         }
         mem::drop(class_registry_lock);
 
@@ -270,6 +235,17 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         mem::drop(class_name_buf);
         mem::drop(title);
 
+        // Set marker to identify our windows in HOOKPROC functions
+        if class_created_here {
+            let _ = set_class_data(hwnd, 0, u32::from_le_bytes(*HOOKPROC_MARKER) as usize);
+        }
+
+        // Setup `HCBT_DESTROYWND` hook
+        let thread_id = GetCurrentThreadId();
+        let hhook = SetWindowsHookExW(WH_CBT, hcbt_destroywnd_hookproc, ptr::null_mut(), thread_id);
+        // TODO: What if this fails? Can it?
+        assert!(!hhook.is_null());
+
         // Run message loop until error or exit
         let mut msg = mem::MaybeUninit::<MSG>::zeroed().assume_init();
         'message_loop: loop {
@@ -278,7 +254,9 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
             // This is one of the main motivations (besides no blocking) to give each window a thread.
             match GetMessageW(&mut msg, ptr::null_mut(), 0, 0) {
                 -1 => panic!("Hard error {:#06X} in GetMessageW loop!", GetLastError()),
-                0 => break 'message_loop,
+                0 => if (&*user_data_ptr).destroy_flag {
+                    break 'message_loop
+                },
                 _ => {
                     // Dispatch message to WindowProc
                     let _ = DispatchMessageW(&msg);
@@ -289,6 +267,9 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         // Registered window classes are unregistered automatically when the process closes.
         // Until then, there's no reason not to have them around as the contents never vary.
         // > if something { UnregisterClassW(class_atom); }
+
+        // Free `HCBT_DESTROYWND` hook (the one associated with this thread)
+        let _ = UnhookWindowsHookEx(hhook);
     }).expect("Failed to spawn window thread");
 
     // Wait until the thread is done creating the window or notifying us why it couldn't do that
@@ -306,11 +287,72 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
     }
 }
 
-unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    unsafe fn user_data<'a>(hwnd: HWND) -> &'a mut WindowUserData {
-        &mut *(get_window_data(hwnd, GWLP_USERDATA) as *mut WindowUserData)
+impl WindowImpl for Window {
+    #[inline]
+    fn events(&self) -> &[Event] {
+        self.event_buffer.as_slice()
     }
 
+    fn execute(&self, mut f: &mut dyn FnMut()) {
+        let wrap: *mut &mut dyn FnMut() = (&mut f) as *mut _;
+        assert_eq!(mem::size_of_val(&wrap), mem::size_of::<WPARAM>());
+        unsafe {
+            let _ = SendMessageW(
+                self.hwnd,
+                RAMEN_WM_EXECUTE,
+                wrap as WPARAM,
+                0,
+            );
+        }
+    }
+
+    #[inline]
+    fn set_visible(&self, visible: bool) {
+        unsafe {
+            let _ = ShowWindow(self.hwnd, if visible { SW_SHOW } else { SW_HIDE });
+        }
+    }
+
+    #[inline]
+    fn set_visible_async(&self, visible: bool) {
+        unsafe {
+            let _ = ShowWindowAsync(self.hwnd, if visible { SW_SHOW } else { SW_HIDE });
+        }
+    }
+
+    fn swap_events(&mut self) {
+        let user_data = unsafe { &mut *self.user_data.get() };
+        let mut vec_lock = mutex_lock(&user_data.event_queue);
+        mem::swap(&mut self.event_buffer, vec_lock.as_mut());
+        vec_lock.clear();
+        mem::drop(vec_lock);
+    }
+}
+
+unsafe fn user_data<'a>(hwnd: HWND) -> &'a mut WindowUserData {
+    &mut *(get_window_data(hwnd, GWLP_USERDATA) as *mut WindowUserData)
+}
+
+unsafe extern "system" fn hcbt_destroywnd_hookproc(code: c_int, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code == HCBT_DESTROYWND {
+        let hwnd = wparam as HWND;
+        if get_class_data(hwnd, GCL_CBCLSEXTRA) == mem::size_of::<usize>()
+            && (get_class_data(hwnd, 0) as u32).to_le_bytes() == *HOOKPROC_MARKER
+        {
+            if user_data(hwnd).destroy_flag {
+                0 // Allow
+            } else {
+                1 // Prevent
+            }
+        } else {
+            0 // Allow (disallow further hooks on HCBT_DESTROYWND)
+        }
+    } else {
+        CallNextHookEx(ptr::null_mut(), code, wparam, lparam)
+    }
+}
+
+unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     #[inline]
     unsafe fn push_event(user_data: &mut WindowUserData, event: Event) {
         let mut lock = mutex_lock(&user_data.event_queue);
@@ -320,7 +362,9 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
 
     match msg {
         WM_DESTROY => {
-            PostQuitMessage(0);
+            if user_data(hwnd).destroy_flag {
+                PostQuitMessage(0);
+            }
             0
         },
 
@@ -359,6 +403,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
 
         // Custom event: Close the window, but for real (`WM_CLOSE` is rejected always).
         RAMEN_WM_CLOSE => {
+            user_data(hwnd).destroy_flag = true;
             let _ = DestroyWindow(hwnd);
             0
         },
