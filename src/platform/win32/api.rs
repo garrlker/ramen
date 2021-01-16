@@ -290,6 +290,6 @@ pub unsafe fn set_window_data(hwnd: HWND, offset: c_int, data: usize) -> usize {
 
 // Macros
 #[inline]
-pub fn MAKELANGID(p: USHORT, s: USHORT) -> LANGID {
+pub const fn MAKELANGID(p: USHORT, s: USHORT) -> LANGID {
     (s << 10) | p
 }
