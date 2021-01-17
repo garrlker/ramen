@@ -17,6 +17,72 @@ macro_rules! document {
     };
 }
 
+macro_rules! dyn_link {
+    (
+        $(#[$outer:meta])*
+        $s_vis:vis struct $s_ident:ident($dlopen:expr => $dlopen_ty:ty | $dlsym:expr) {
+            $($($module_name:literal)|+ {
+                $(
+                    $(#[$fn_outer:meta])*
+                    fn $sym_fn:ident($($name:ident : $ty:ty),*$(,)?) -> $ret:ty;
+                )*
+            }),* $(,)?
+        }
+    ) => {
+        $(#[$outer])*
+        pub struct $s_ident {
+            $($(
+                $(#[$fn_outer])*
+                $sym_fn : ::std::option::Option<
+                    unsafe extern "system" fn($($name : $ty ,)*) -> $ret
+                > ,
+            )*)*
+        }
+
+        impl $s_ident {
+            #[allow(unused_doc_comments)]
+            unsafe fn _link() -> Self {
+                let mut inst = ::std::mem::MaybeUninit::<Self>::uninit();
+                let mut inst_ref = &mut *(inst.as_mut_ptr());
+                $(
+                    let mut handle = 0 as $dlopen_ty;
+                    for name in &[$(c_string!($module_name) ,)*] {
+                        handle = $dlopen(name.as_ptr().cast());
+                        if handle != 0 as $dlopen_ty {
+                            break
+                        }
+                    }
+                    if handle != 0 as $dlopen_ty {
+                        $(
+                            $(#[$fn_outer])*
+                            {
+                                inst_ref.$sym_fn =
+                                    ::std::mem::transmute::<_,
+                                        Option<unsafe extern "system" fn($($name : $ty ,)*) -> $ret>>
+                                    ($dlsym(handle, c_string!(stringify!($sym_fn)).as_ptr().cast()));
+                            }
+                        )*
+                    } else {
+                        $(
+                            $(#[$fn_outer])*
+                            {
+                                inst_ref.$sym_fn = None;
+                            }
+                        )*
+                    }
+                )*
+                inst.assume_init()
+            }
+            $($(
+                $(#[$fn_outer])*
+                $s_vis unsafe fn $sym_fn(&self, $($name : $ty ,)*) -> ::std::option::Option<$ret> {
+                    self.$sym_fn.map(|f| f($($name ,)*))
+                }
+            )*)*
+        }
+    };
+}
+
 /// Used to const initialize fields which don't necessarily need allocation (ex. str).
 pub enum MaybeStatic<T: ?Sized + 'static> {
     Static(&'static T),
