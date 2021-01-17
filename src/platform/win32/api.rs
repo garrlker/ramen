@@ -20,6 +20,7 @@ def_handle!("Opaque handle to the executable file in memory.", HINSTANCE, HINSTA
 def_handle!("Opaque handle to a monitor.", HMONITOR, HMONITOR__);
 def_handle!("Opaque handle to a window.", HWND, HWND__);
 def_handle!(DPI_AWARENESS_CONTEXT, DPI_AWARENESS_CONTEXT__);
+def_handle!(FARPROC, __some_function);
 def_handle!(HBRUSH, HBRUSH__);
 def_handle!(HDC, HDC__);
 def_handle!(HHOOK, HHOOK__);
@@ -61,6 +62,8 @@ pub type LPCWSTR = *const WCHAR;
 pub type LPVOID = *mut c_void;
 pub type LPWSTR = *mut WCHAR;
 pub type LRESULT = LONG_PTR;
+pub type NTSTATUS = LONG;
+pub type PROCESS_DPI_AWARENESS = u32;
 pub type UINT = c_uint;
 pub type UINT_PTR = usize;
 pub type ULONG_PTR = usize;
@@ -91,6 +94,7 @@ pub const SW_SHOW: c_int = 5;
 pub const WH_CBT: c_int = 5;
 pub const WM_CREATE: UINT = 0x0001;
 pub const WM_DESTROY: UINT = 0x0002;
+pub const WM_SETTEXT: UINT = 0x000C;
 pub const WM_CLOSE: UINT = 0x0010;
 pub const WM_NCCREATE: UINT = 0x0081;
 pub const WM_NCDESTROY: UINT = 0x0082;
@@ -145,6 +149,20 @@ pub struct MSG {
     pub pt: POINT,
 }
 #[repr(C)]
+pub struct OSVERSIONINFOEXW {
+    pub dwOSVersionInfoSize: DWORD,
+    pub dwMajorVersion: DWORD,
+    pub dwMinorVersion: DWORD,
+    pub dwBuildNumber: DWORD,
+    pub dwPlatformId: DWORD,
+    pub szCSDVersion: [WCHAR; 128],
+    pub wServicePackMajor: WORD,
+    pub wServicePackMinor: WORD,
+    pub wSuiteMask: WORD,
+    pub wProductType: BYTE,
+    pub wReserved: BYTE,
+}
+#[repr(C)]
 pub struct WNDCLASSEXW {
     pub cbSize: UINT,
     pub style: UINT,
@@ -167,6 +185,9 @@ extern "system" {
     pub fn SetLastError(dwErrCode: DWORD);
     pub fn ExitProcess(uExitCode: UINT);
     pub fn GetCurrentThreadId() -> DWORD;
+
+    pub fn GetProcAddress(hModule: HMODULE, lpProcName: LPCSTR) -> FARPROC;
+    pub fn LoadLibraryExA(lpLibFileName: LPCSTR, hFile: HANDLE, dwFlags: DWORD) -> HMODULE;
 
     pub fn LocalFree(hMem: HLOCAL) -> HLOCAL;
     pub fn FormatMessageW(
@@ -301,3 +322,90 @@ pub unsafe fn set_window_data(hwnd: HWND, offset: c_int, data: usize) -> usize {
 pub const fn MAKELANGID(p: USHORT, s: USHORT) -> LANGID {
     (s << 10) | p
 }
+
+// ---------------------
+// -- Dynamic Linking --
+// ---------------------
+
+#[inline]
+unsafe fn dlopen(name: LPCSTR) -> HMODULE {
+    LoadLibraryExA(name, 0 as HANDLE, 0)
+}
+
+dyn_link! {
+    pub struct Win32DL(dlopen => HMODULE | GetProcAddress) {
+        "Dwmapi.dll" {
+            /// (Windows Vista+)
+            /// Advanced querying of window attributes from the desktop window manager.
+            fn DwmGetWindowAttribute(
+                hWnd: HWND,
+                dwAttribute: DWORD,
+                pvAttribute: LPVOID,
+                cbAttribute: DWORD,
+            ) -> HRESULT;
+        },
+
+        "Ntdll.dll" {
+            /// (Win2000+)
+            /// This is used in place of VerifyVersionInfoW, as it's not manifest dependent, and doesn't lie.
+            fn RtlVerifyVersionInfo(
+                VersionInfo: *mut OSVERSIONINFOEXW,
+                TypeMask: DWORD,
+                ConditionMask: c_ulonglong,
+            ) -> NTSTATUS;
+        },
+
+        "Shcore.dll" {
+            /// (Win8.1+)
+            /// The intended way to query a monitor's DPI values since PMv1 and above.
+            fn GetDpiForMonitor(
+                hmonitor: HMONITOR,
+                dpiType: u32,
+                dpiX: *mut UINT,
+                dpiY: *mut UINT,
+            ) -> HRESULT;
+        },
+
+        "User32.dll" {
+            // (Win10 1607+)
+            // It's a version of AdjustWindowRectEx with DPI, but they added it 7 years late.
+            // The DPI parameter accounts for scaled non-client areas, not to scale client areas.
+            fn AdjustWindowRectExForDpi(
+                lpRect: *mut RECT,
+                dwStyle: DWORD,
+                bMenu: BOOL,
+                dwExStyle: DWORD,
+                dpi: UINT,
+            ) -> BOOL;
+
+            /// (Win10 1603+)
+            /// Enables automatic scaling of the non-client area as a hack for PMv1 DPI mode.
+            fn EnableNonClientDpiScaling(hwnd: HWND) -> BOOL;
+
+            /// (Vista+)
+            /// First introduction of DPI awareness, this function enables System-Aware DPI.
+            fn SetProcessDPIAware() -> BOOL;
+
+            /// (Win8.1+)
+            /// Allows you to set either System-Aware DPI mode, or Per-Monitor-Aware (v1).
+            fn SetProcessDpiAwareness(value: PROCESS_DPI_AWARENESS) -> HRESULT;
+
+            /// (Win10 1703+)
+            /// Allows you to set either System-Aware DPI mode, or Per-Monitor-Aware (v1 *or* v2).
+            fn SetProcessDpiAwarenessContext(value: DPI_AWARENESS_CONTEXT) -> BOOL;
+        },
+    }
+}
+
+impl Win32DL {
+    pub unsafe fn link() -> Self {
+        // Trying to load a nonexistent dynamic library or symbol sets the thread-global error.
+        // Since this is intended and acceptable for missing functions, we restore the error state.
+
+        let prev_error = GetLastError();
+        let instance = Self::_link();
+        SetLastError(prev_error);
+        instance
+    }
+}
+
