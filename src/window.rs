@@ -19,6 +19,8 @@ pub struct Window {
 pub(crate) trait WindowImpl {
     fn events(&self) -> &[Event];
     fn execute(&self, f: &mut dyn FnMut());
+    fn set_title(&self, title: &str);
+    fn set_title_async(&self, title: &str);
     fn set_visible(&self, visible: bool);
     fn set_visible_async(&self, visible: bool);
     fn swap_events(&mut self);
@@ -70,6 +72,16 @@ impl Window {
         F: FnMut(&Self) + Send,
     {
         self.inner.execute(&mut move || f(self));
+    }
+
+    #[inline]
+    pub fn set_title(&self, title: &str) {
+        self.inner.set_title(title);
+    }
+
+    #[inline]
+    pub fn set_title_async(&self, title: &str) {
+        self.inner.set_title_async(title);
     }
 
     /// Sets whether the window is visible or hidden.

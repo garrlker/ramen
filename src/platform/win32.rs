@@ -27,6 +27,7 @@ const EVENT_BUF_INITIAL_SIZE: usize = 512;
 // Custom events
 const RAMEN_WM_EXECUTE: UINT = WM_USER + 0;
 const RAMEN_WM_CLOSE: UINT = WM_USER + 1;
+const RAMEN_WM_SETTEXT_ASYNC: UINT = WM_USER + 2;
 
 #[derive(Debug)]
 pub struct InternalError {
@@ -306,6 +307,36 @@ impl WindowImpl for Window {
         }
     }
 
+    fn set_title(&self, title: &str) {
+        let mut wstr = Vec::new();
+        let ptr = util::str_to_wide_null(title, &mut wstr);
+        unsafe {
+            let _ = SendMessageW(self.hwnd, WM_SETTEXT, 0, ptr as LPARAM);
+        }
+    }
+
+    fn set_title_async(&self, title: &str) {
+        // Win32 has special behaviour on WM_SETTEXT, since it takes a pointer to a buffer.
+        // You can't actually call it asynchronously, in case it's being sent from a different process.
+        // Only if they had Rust back then, this poorly documented stupid detail would not exist,
+        // as trying to use PostMessageW with WM_SETTEXT silently fails because it's scared of lifetimes.
+        // As a workaround, we just define our own event, X_WM_SET_TITLE_ASYNC, and still support WM_SETTEXT.
+        // This is better than using the "unused parameter" in WM_SETTEXT anyways.
+        // More info: https://devblogs.microsoft.com/oldnewthing/20110916-00/?p=9623
+        let mut wstr: Vec<WCHAR> = Vec::new();
+        unsafe {
+            if *util::str_to_wide_null(title, &mut wstr) == 0x00 {
+                // There's a special implementation for lParam == NULL
+                let _ = PostMessageW(self.hwnd, RAMEN_WM_SETTEXT_ASYNC, 0, 0);
+            } else {
+                // Post async message - `window_proc` manages the memory
+                let lparam = wstr.as_ptr() as LPARAM;
+                let _ = PostMessageW(self.hwnd, RAMEN_WM_SETTEXT_ASYNC, wstr.len() as WPARAM, lparam);
+                mem::forget(wstr);
+            }
+        }
+    }
+
     #[inline]
     fn set_visible(&self, visible: bool) {
         unsafe {
@@ -393,18 +424,35 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
         },
 
         // Custom event: Run arbitrary functions.
+        // wParam: Function pointer of type `*mut &mut dyn FnMut()`.
+        // lParam: Unused, set to zero.
         RAMEN_WM_EXECUTE => {
             // TODO: Before release, test if any blocking functions in here can deadlock.
             // It shouldn't actually be possible, but better safe than sorry.
-            let f = wparam as *mut &mut (dyn FnMut());
+            let f = wparam as *mut &mut dyn FnMut();
             (*f)();
             0
         },
 
         // Custom event: Close the window, but for real (`WM_CLOSE` is rejected always).
+        // wParam & lParam: Unused, set to zero.
         RAMEN_WM_CLOSE => {
             user_data(hwnd).destroy_flag = true;
             let _ = DestroyWindow(hwnd);
+            0
+        },
+
+        // Custom event: Set the title asynchronously.
+        // wParam: Buffer length, if lParam != NULL.
+        // lParam: Vec<WCHAR> pointer or NULL for empty.
+        RAMEN_WM_SETTEXT_ASYNC => {
+            if lparam != 0 {
+                let vec = Vec::from_raw_parts(lparam as *mut WCHAR, wparam as usize, wparam as usize);
+                let _ = DefWindowProcW(hwnd, WM_SETTEXT, 0, vec.as_ptr() as LPARAM);
+                mem::drop(vec); // managed by `window_proc`, caller should `mem::forget`
+            } else {
+                let _ = DefWindowProcW(hwnd, WM_SETTEXT, 0, util::WSTR_EMPTY.as_ptr() as LPARAM);
+            }
             0
         },
 
