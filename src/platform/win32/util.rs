@@ -1,5 +1,5 @@
 use super::api::*;
-use std::{ptr, slice};
+use std::{mem, ptr, slice};
 
 /// Empty wide string (to point to)
 pub static WSTR_EMPTY: &[WCHAR] = &[0x00];
@@ -112,5 +112,104 @@ pub fn lpcwstr_to_str(src: LPCWSTR, buffer: &mut Vec<u8>) {
             count, ptr::null(), ptr::null_mut(),
         );
         buffer.set_len(count as usize - 1); // nulled input -> null in output
+    }
+}
+
+pub unsafe fn is_windows_ver_or_greater(dl: &Win32DL, major: WORD, minor: WORD, sp_major: WORD) -> bool {
+    let mut osvi: OSVERSIONINFOEXW = mem::zeroed();
+    osvi.dwOSVersionInfoSize = mem::size_of_val(&osvi) as DWORD;
+    osvi.dwMajorVersion = major.into();
+    osvi.dwMinorVersion = minor.into();
+    osvi.wServicePackMajor = sp_major.into();
+
+    let mask = VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR;
+    let mut cond = VerSetConditionMask(0, VER_MAJORVERSION, VER_GREATER_EQUAL);
+    cond = VerSetConditionMask(cond, VER_MINORVERSION, VER_GREATER_EQUAL);
+    cond = VerSetConditionMask(cond, VER_SERVICEPACKMAJOR, VER_GREATER_EQUAL);
+
+    dl.RtlVerifyVersionInfo(&mut osvi, mask, cond) == Some(0)
+}
+
+pub unsafe fn is_win10_ver_or_greater(dl: &Win32DL, build: WORD) -> bool {
+    let mut osvi: OSVERSIONINFOEXW = mem::zeroed();
+    osvi.dwOSVersionInfoSize = mem::size_of_val(&osvi) as DWORD;
+    osvi.dwMajorVersion = 10;
+    osvi.dwMinorVersion = 0;
+    osvi.dwBuildNumber = build.into();
+
+    let mask = VER_MAJORVERSION | VER_MINORVERSION | VER_BUILDNUMBER;
+    let mut cond = VerSetConditionMask(0, VER_MAJORVERSION, VER_GREATER_EQUAL);
+    cond = VerSetConditionMask(cond, VER_MINORVERSION, VER_GREATER_EQUAL);
+    cond = VerSetConditionMask(cond, VER_BUILDNUMBER, VER_GREATER_EQUAL);
+
+    dl.RtlVerifyVersionInfo(&mut osvi, mask, cond) == Some(0)
+}
+
+pub enum DpiMode {
+    Unsupported,
+    System,
+    PerMonitorV1,
+    PerMonitorV2,
+}
+
+pub struct Win32 {
+    /// Dynamically linked Win32 functions that might not be available on all systems.
+    dl: Win32DL,
+
+    /// The DPI mode that's enabled process-wide. The newest available is selected.
+    /// This is done at runtime, and not in the manifest, because that's incredibly stupid.
+    dpi_mode: DpiMode,
+
+    // Cached version checks, as the system can't magically upgrade without restarting
+    at_least_vista: bool,
+    at_least_8_point_1: bool,
+    at_least_anniversary_update: bool,
+    at_least_creators_update: bool,
+}
+
+impl Win32 {
+    pub fn new() -> Self {
+        const VISTA_MAJ: WORD = (_WIN32_WINNT_VISTA >> 8) & 0xFF;
+        const VISTA_MIN: WORD = _WIN32_WINNT_VISTA & 0xFF;
+        const W81_MAJ: WORD = (_WIN32_WINNT_WINBLUE >> 8) & 0xFF;
+        const W81_MIN: WORD = _WIN32_WINNT_WINBLUE & 0xFF;
+
+        unsafe {
+            let dl = Win32DL::link();
+
+            let at_least_vista = is_windows_ver_or_greater(&dl, VISTA_MAJ, VISTA_MIN, 0);
+            let at_least_8_point_1 = is_windows_ver_or_greater(&dl, W81_MAJ, W81_MIN, 0);
+            let at_least_anniversary_update = is_win10_ver_or_greater(&dl, 14393);
+            let at_least_creators_update = is_win10_ver_or_greater(&dl, 15063);
+
+            let dpi_mode = if at_least_creators_update {
+                assert_eq!(dl.SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2), Some(TRUE));
+                DpiMode::PerMonitorV2
+            } else if at_least_8_point_1 {
+                assert_eq!(dl.SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE), Some(S_OK));
+                DpiMode::PerMonitorV1
+            } else if at_least_vista {
+                assert_ne!(dl.SetProcessDPIAware().unwrap_or(FALSE), FALSE);
+                DpiMode::System
+            } else {
+                DpiMode::Unsupported
+            };
+
+            Self {
+                dl,
+                dpi_mode,
+                at_least_vista,
+                at_least_8_point_1,
+                at_least_anniversary_update,
+                at_least_creators_update,
+            }
+        }
+    }
+}
+
+impl Default for Win32 {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
     }
 }

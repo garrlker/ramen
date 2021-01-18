@@ -3,8 +3,7 @@
 pub(crate) mod api;
 pub(crate) mod util;
 
-use self::api::*;
-
+use api::*;
 use crate::{
     error::Error,
     event::{CloseReason, Event},
@@ -15,6 +14,9 @@ use std::{cell, fmt, mem, ops, ptr, sync, thread};
 
 /// Global lock used to synchronize classes being registered or queried.
 static CLASS_REGISTRY_LOCK: LazyCell<Mutex<()>> = LazyCell::new(Default::default);
+
+/// Dynamically queried Win32 functions and constants.
+static WIN32: LazyCell<util::Win32> = LazyCell::new(Default::default);
 
 /// Marker to filter out implementation magic like `CicMarshalWndClass`
 const HOOKPROC_MARKER: &[u8; 4] = b"viri";
@@ -127,6 +129,9 @@ impl Default for WindowUserData {
 }
 
 pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> {
+    // Force this so it panics the main thread if something somehow goes wrong
+    let _ = WIN32.get();
+
     // Condvar & mutex pair for receiving the `Result<WindowRepr, Error>` from spawned thread
     let signal = sync::Arc::new((Mutex::<Option<Result<WindowRepr, Error>>>::new(None), Condvar::new()));
 

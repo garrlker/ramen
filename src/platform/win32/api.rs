@@ -77,10 +77,15 @@ pub type HOOKPROC = unsafe extern "system" fn(c_int, WPARAM, LPARAM) -> LRESULT;
 pub type WNDPROC = unsafe extern "system" fn(HWND, UINT, WPARAM, LPARAM) -> LRESULT;
 
 // Constants
+pub const _WIN32_WINNT_VISTA: WORD = 0x0600;
+pub const _WIN32_WINNT_WINBLUE: WORD = 0x0603;
 pub const CP_UTF8: DWORD = 65001;
 pub const CS_OWNDC: UINT = 0x0020;
 pub const CW_USEDEFAULT: c_int = 0x80000000;
+pub const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2: DPI_AWARENESS_CONTEXT = -4isize as _;
+pub const E_INVALIDARG: HRESULT = 0x80070057;
 pub const ERROR_SUCCESS: DWORD = 0; // lol
+pub const FALSE: BOOL = 0;
 pub const FORMAT_MESSAGE_ALLOCATE_BUFFER: DWORD = 0x00000100;
 pub const FORMAT_MESSAGE_FROM_SYSTEM: DWORD = 0x00001000;
 pub const FORMAT_MESSAGE_IGNORE_INSERTS: DWORD = 0x00000200;
@@ -88,9 +93,19 @@ pub const GCL_CBCLSEXTRA: c_int = -20;
 pub const GWLP_USERDATA: c_int = -21;
 pub const HCBT_DESTROYWND: c_int = 4;
 pub const LANG_NEUTRAL: USHORT = 0x00;
+pub const PROCESS_PER_MONITOR_DPI_AWARE: PROCESS_DPI_AWARENESS = 2;
+pub const PROCESS_SYSTEM_DPI_AWARE: PROCESS_DPI_AWARENESS = 1;
 pub const SUBLANG_DEFAULT: USHORT = 0x01;
+pub const S_OK: HRESULT = 0;
 pub const SW_HIDE: c_int = 0;
 pub const SW_SHOW: c_int = 5;
+pub const TRUE: BOOL = 1;
+pub const VER_BUILDNUMBER: DWORD = 0x0000004;
+pub const VER_GREATER_EQUAL: BYTE = 3;
+pub const VER_MAJORVERSION: DWORD = 0x0000002;
+pub const VER_MINORVERSION: DWORD = 0x0000001;
+pub const VER_SERVICEPACKMAJOR: DWORD = 0x0000020;
+pub const VER_SERVICEPACKMINOR: DWORD = 0x0000010;
 pub const WH_CBT: c_int = 5;
 pub const WM_CREATE: UINT = 0x0001;
 pub const WM_DESTROY: UINT = 0x0002;
@@ -188,6 +203,7 @@ extern "system" {
 
     pub fn GetProcAddress(hModule: HMODULE, lpProcName: LPCSTR) -> FARPROC;
     pub fn LoadLibraryExA(lpLibFileName: LPCSTR, hFile: HANDLE, dwFlags: DWORD) -> HMODULE;
+    pub fn VerSetConditionMask(ConditionMask: c_ulonglong, TypeMask: DWORD, Condition: BYTE) -> c_ulonglong;
 
     pub fn LocalFree(hMem: HLOCAL) -> HLOCAL;
     pub fn FormatMessageW(
