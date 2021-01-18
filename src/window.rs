@@ -74,17 +74,23 @@ impl Window {
         self.inner.execute(&mut move || f(self));
     }
 
+    /// Sets the text that appears in the title bar of the window.
+    ///
+    /// Note that if the window is borderless, fullscreen, or simply has no title bar,
+    /// the change will not be visible.
+    /// It will however persist for when the style is changed to later include a title bar.
     #[inline]
     pub fn set_title(&self, title: &str) {
         self.inner.set_title(title);
     }
 
+    /// Non-blocking variant of [`set_title`](Self::set_title).
     #[inline]
     pub fn set_title_async(&self, title: &str) {
         self.inner.set_title_async(title);
     }
 
-    /// Sets whether the window is visible or hidden.
+    /// Sets whether the window is hidden (`false`) or visible (`true`).
     #[inline]
     pub fn set_visible(&self, visible: bool) {
         self.inner.set_visible(visible);
