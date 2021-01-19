@@ -1,4 +1,4 @@
-//! Windows API specific implementations and API extensions.
+//! Win32 specific implementations and API extensions.
 
 pub(crate) mod api;
 pub(crate) mod util;
@@ -67,6 +67,42 @@ pub(crate) struct Window {
 unsafe impl Send for Window {}
 unsafe impl Sync for Window {}
 
+/// Win32 specific extensions to the [`WindowBuilder`](crate::window::WindowBuilder) API.
+///
+/// # Example
+///
+/// ```rust
+/// use ramen::platform::win32::WindowBuilderExt as _;
+/// use ramen::window::Window;
+///
+/// let window = Window::builder()
+///     .tool_window(true)
+///     .build()?;
+/// ```
+pub trait WindowBuilderExt {
+    /// Sets whether the window uses the
+    /// [`WS_EX_TOOLWINDOW`](https://docs.microsoft.com/en-us/windows/win32/winmsg/extended-window-styles#WS_EX_TOOLWINDOW)
+    /// style.
+    ///
+    /// This is equivalent to the .NET
+    /// [`WindowStyle.ToolWindow`](https://docs.microsoft.com/en-us/dotnet/api/system.windows.windowstyle?view=net-5.0#System_Windows_WindowStyle_ToolWindow)
+    /// property.
+    ///
+    /// From MSDN: *The window is intended to be used as a floating toolbar.*
+    /// *A tool window has a title bar that is shorter than a normal title bar,*
+    /// *and the window title is drawn using a smaller font.*
+    /// *A tool window does not appear in the taskbar or in the dialog*
+    /// *that appears when the user presses ALT+TAB.*
+    fn tool_window(&mut self, tool_window: bool) -> &mut Self;
+}
+
+impl WindowBuilderExt for WindowBuilder {
+    fn tool_window(&mut self, tool_window: bool) -> &mut Self {
+        self.style.tool_window = tool_window;
+        self
+    }
+}
+
 pub(crate) type WindowRepr = Window;
 
 struct WindowCreateParams {
@@ -104,6 +140,16 @@ impl WindowStyle {
                 style |= WS_MAXIMIZEBOX;
             }
             style |= WS_SYSMENU;
+        }
+
+        style
+    }
+
+    pub fn dword_style_ex(&self) -> DWORD {
+        let mut style = 0;
+
+        if self.tool_window {
+            style |= WS_EX_TOOLWINDOW;
         }
 
         style
@@ -176,10 +222,10 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         mem::drop(class_registry_lock);
 
         let style = builder.style.dword_style();
-        let style_ex = 0;
+        let style_ex = builder.style.dword_style_ex();
 
-        let width = 1280;
-        let height = 720;
+        let width = 600;
+        let height = 360;
         let user_data: Box<cell::UnsafeCell<WindowUserData>> = Default::default();
 
         let builder_ptr = (&builder) as *const WindowBuilder;

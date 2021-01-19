@@ -133,6 +133,9 @@ impl WindowBuilder {
                 controls: Some(WindowControls::no_maximize()),
                 resizable: true,
                 visible: true,
+
+                #[cfg(windows)]
+                tool_window: false,
             },
             title: MaybeStatic::Static("a nice window"),
         }
@@ -278,4 +281,7 @@ pub(crate) struct WindowStyle {
     pub resizable: bool,
     pub visible: bool,
     pub controls: Option<WindowControls>,
+
+    #[cfg(windows)]
+    pub tool_window: bool,
 }
