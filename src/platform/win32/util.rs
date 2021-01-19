@@ -1,5 +1,9 @@
 use super::api::*;
+use crate::monitor::Size;
 use std::{mem, ptr, slice};
+
+/// The base DPI at 100% scaling
+pub const BASE_DPI: UINT = 96;
 
 /// Empty wide string (to point to)
 pub static WSTR_EMPTY: &[WCHAR] = &[0x00];
@@ -145,6 +149,31 @@ pub unsafe fn is_win10_ver_or_greater(dl: &Win32DL, build: WORD) -> bool {
     dl.RtlVerifyVersionInfo(&mut osvi, mask, cond) == Some(0)
 }
 
+/// Due to legacy reasons, the close button is a system menu item and not a window style.
+/// This function is for turning it on and off (enabled and disabled, rather).
+pub unsafe fn set_close_button(hwnd: HWND, enabled: bool) {
+    let menu: HMENU = GetSystemMenu(hwnd, FALSE);
+    let flag = if enabled {
+        MF_BYCOMMAND | MF_ENABLED
+    } else {
+        MF_BYCOMMAND | MF_DISABLED | MF_GRAYED
+    };
+    let _ = EnableMenuItem(menu, SC_CLOSE as UINT, flag);
+}
+
+/// Due to legacy reasons, changing the window frame does nothing (since it's cached),
+/// until you update it with SetWindowPos with just "oh yeah, the frame changed, that's about it".
+#[inline]
+pub unsafe fn ping_window_frame(hwnd: HWND) {
+    const MASK: UINT = SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOZORDER | SWP_FRAMECHANGED;
+    let _ = SetWindowPos(hwnd, ptr::null_mut(), 0, 0, 0, 0, MASK);
+}
+
+#[inline]
+pub fn rect_to_size2d(rect: &RECT) -> (LONG, LONG) {
+    (rect.right - rect.left, rect.bottom - rect.top)
+}
+
 pub enum DpiMode {
     Unsupported,
     System,
@@ -204,6 +233,24 @@ impl Win32 {
                 at_least_creators_update,
             }
         }
+    }
+
+    pub unsafe fn adjust_window_for_dpi(&self, size: Size, style: DWORD, style_ex: DWORD, dpi: UINT) -> (LONG, LONG) {
+        let (width, height) = size.scale_if_logical(dpi as f64 / BASE_DPI as f64);
+        let mut window = RECT { left: 0, top: 0, bottom: height as LONG, right: width as LONG };
+        if match self.dpi_mode {
+            // Non-client area DPI scaling is enabled in PMv1 Win10 1607+ and PMv2 (any).
+            // For PMv1, this is done with EnableNonClientDpiScaling at WM_NCCREATE.
+            DpiMode::PerMonitorV1 if self.at_least_anniversary_update => true,
+            DpiMode::PerMonitorV2 => true,
+            _ => false,
+        } {
+            let _ = self.dl.AdjustWindowRectExForDpi(&mut window, style, FALSE, style_ex, dpi);
+        } else {
+            // TODO: This *is* correct for old PMv1, right? How does broken NC scaling work?
+            let _ = AdjustWindowRectEx(&mut window, style, FALSE, style_ex);
+        }
+        rect_to_size2d(&window)
     }
 }
 

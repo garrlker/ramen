@@ -90,15 +90,37 @@ pub const FORMAT_MESSAGE_ALLOCATE_BUFFER: DWORD = 0x00000100;
 pub const FORMAT_MESSAGE_FROM_SYSTEM: DWORD = 0x00001000;
 pub const FORMAT_MESSAGE_IGNORE_INSERTS: DWORD = 0x00000200;
 pub const GCL_CBCLSEXTRA: c_int = -20;
-pub const GWLP_USERDATA: c_int = -21;
+pub const GWL_EXSTYLE: c_int = -20;
+pub const GWL_STYLE: c_int = -16;
+pub const GWL_USERDATA: c_int = -21;
 pub const HCBT_DESTROYWND: c_int = 4;
 pub const LANG_NEUTRAL: USHORT = 0x00;
+pub const MF_BYCOMMAND: UINT = 0x00000000;
+pub const MF_DISABLED: UINT = 0x00000002;
+pub const MF_ENABLED: UINT = 0x00000000;
+pub const MF_GRAYED: UINT = 0x00000001;
 pub const PROCESS_PER_MONITOR_DPI_AWARE: PROCESS_DPI_AWARENESS = 2;
 pub const PROCESS_SYSTEM_DPI_AWARE: PROCESS_DPI_AWARENESS = 1;
 pub const SUBLANG_DEFAULT: USHORT = 0x01;
 pub const S_OK: HRESULT = 0;
+pub const SC_CLOSE: WPARAM = 0xF060;
 pub const SW_HIDE: c_int = 0;
 pub const SW_SHOW: c_int = 5;
+pub const SWP_ASYNCWINDOWPOS: UINT = 0x4000;
+pub const SWP_DEFERERASE: UINT = 0x2000;
+pub const SWP_DRAWFRAME: UINT = SWP_FRAMECHANGED;
+pub const SWP_FRAMECHANGED: UINT = 0x0020;
+pub const SWP_HIDEWINDOW: UINT = 0x0080;
+pub const SWP_NOACTIVATE: UINT = 0x0010;
+pub const SWP_NOCOPYBITS: UINT = 0x0100;
+pub const SWP_NOMOVE: UINT = 0x0002;
+pub const SWP_NOOWNERZORDER: UINT = 0x0200;
+pub const SWP_NOREDRAW: UINT = 0x0008;
+pub const SWP_NOREPOSITION: UINT = SWP_NOOWNERZORDER;
+pub const SWP_NOSENDCHANGING: UINT = 0x0400;
+pub const SWP_NOSIZE: UINT = 0x0001;
+pub const SWP_NOZORDER: UINT = 0x0004;
+pub const SWP_SHOWWINDOW: UINT = 0x0040;
 pub const TRUE: BOOL = 1;
 pub const VER_BUILDNUMBER: DWORD = 0x0000004;
 pub const VER_GREATER_EQUAL: BYTE = 3;
@@ -111,6 +133,7 @@ pub const WM_CREATE: UINT = 0x0001;
 pub const WM_DESTROY: UINT = 0x0002;
 pub const WM_SETTEXT: UINT = 0x000C;
 pub const WM_CLOSE: UINT = 0x0010;
+pub const WM_SHOWWINDOW: UINT = 0x0018;
 pub const WM_NCCREATE: UINT = 0x0081;
 pub const WM_NCDESTROY: UINT = 0x0082;
 pub const WM_USER: UINT = 0x0400;
@@ -257,6 +280,8 @@ extern "system" {
         hInstance: HINSTANCE,
         lpParam: LPVOID,
     ) -> HWND;
+    pub fn AdjustWindowRectEx(lpRect: *mut RECT, dwStyle: DWORD, bMenu: BOOL, dwExStyle: DWORD) -> BOOL;
+    pub fn SetWindowPos(hWnd: HWND, hWndInsertAfter: HWND, X: c_int, Y: c_int, cx: c_int, cy: c_int, uFlags: UINT) -> BOOL;
     pub fn DestroyWindow(hWnd: HWND) -> BOOL;
 
     // Hooking API
@@ -275,6 +300,10 @@ extern "system" {
     // Message loop utility
     pub fn ShowWindow(hWnd: HWND, nCmdShow: c_int) -> BOOL;
     pub fn ShowWindowAsync(hWnd: HWND, nCmdShow: c_int) -> BOOL;
+
+    // Misc legacy garbage
+    pub fn EnableMenuItem(hMenu: HMENU, uIDEnableItem: UINT, uEnable: UINT) -> BOOL;
+    pub fn GetSystemMenu(hWnd: HWND, bRevert: BOOL) -> HMENU;
 
     // Class/window storage manipulation
     pub fn GetClassLongW(hWnd: HWND, nIndex: c_int) -> DWORD;

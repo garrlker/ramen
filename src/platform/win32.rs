@@ -8,7 +8,7 @@ use crate::{
     error::Error,
     event::{CloseReason, Event},
     helpers::{LazyCell, sync::{condvar_notify1, condvar_wait, mutex_lock, Condvar, Mutex}},
-    window::{WindowBuilder, WindowImpl, WindowStyle},
+    window::{WindowBuilder, WindowControls, WindowImpl, WindowStyle},
 };
 use std::{cell, fmt, mem, ops, ptr, sync, thread};
 
@@ -30,6 +30,7 @@ const EVENT_BUF_INITIAL_SIZE: usize = 512;
 const RAMEN_WM_EXECUTE: UINT = WM_USER + 0;
 const RAMEN_WM_CLOSE: UINT = WM_USER + 1;
 const RAMEN_WM_SETTEXT_ASYNC: UINT = WM_USER + 2;
+const RAMEN_WM_SETCONTROLS: UINT = WM_USER + 3;
 
 #[derive(Debug)]
 pub struct InternalError {
@@ -228,13 +229,12 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
         let style = builder.style.dword_style();
         let style_ex = builder.style.dword_style_ex();
 
-        let width = 600;
-        let height = 360;
+        let dpi = util::BASE_DPI;
+        let (width, height) = WIN32.adjust_window_for_dpi(builder.inner_size, style, style_ex, dpi);
         let user_data: Box<cell::UnsafeCell<WindowUserData>> = Default::default();
 
         let builder_ptr = (&builder) as *const WindowBuilder;
         let user_data_ptr = user_data.as_ref().get();
-        (&mut *user_data_ptr).window_style = builder.style.clone();
         let mut params = WindowCreateParams {
             builder_ptr,
             user_data_ptr,
@@ -362,6 +362,20 @@ impl WindowImpl for Window {
         }
     }
 
+    fn set_controls(&self, controls: Option<WindowControls>) {
+        let controls = controls.map(|c| c.to_bits()).unwrap_or(!0);
+        unsafe {
+            let _ = SendMessageW(self.hwnd, RAMEN_WM_SETCONTROLS, controls as WPARAM, 0);
+        }
+    }
+
+    fn set_controls_async(&self, controls: Option<WindowControls>) {
+        let controls = controls.map(|c| c.to_bits()).unwrap_or(!0);
+        unsafe {
+            let _ = PostMessageW(self.hwnd, RAMEN_WM_SETCONTROLS, controls as WPARAM, 0);
+        }
+    }
+
     fn set_title(&self, title: &str) {
         let mut wstr = Vec::new();
         let ptr = util::str_to_wide_null(title, &mut wstr);
@@ -416,7 +430,7 @@ impl WindowImpl for Window {
 }
 
 unsafe fn user_data<'a>(hwnd: HWND) -> &'a mut WindowUserData {
-    &mut *(get_window_data(hwnd, GWLP_USERDATA) as *mut WindowUserData)
+    &mut *(get_window_data(hwnd, GWL_USERDATA) as *mut WindowUserData)
 }
 
 unsafe extern "system" fn hcbt_destroywnd_hookproc(code: c_int, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -447,6 +461,23 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
     }
 
     match msg {
+        WM_CREATE => {
+            // `lpCreateParams` is the first member, so `CREATESTRUCTW *` is `WindowCreateParams **`
+            let params = &mut **(lparam as *const *mut WindowCreateParams);
+            let builder = &*params.builder_ptr;
+            let mut user_data = &mut *params.user_data_ptr;
+
+            // The close button is part of the system menu, so it's updated here
+            if let Some(false) = builder.style.controls.as_ref().map(|c| c.close) {
+                util::set_close_button(hwnd, false);
+            }
+
+            // Copy style
+            user_data.window_style = builder.style.clone();
+
+            0
+        },
+
         WM_DESTROY => {
             if user_data(hwnd).destroy_flag {
                 PostQuitMessage(0);
@@ -461,12 +492,20 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             0
         },
 
+        WM_SHOWWINDOW => {
+            // If `lparam == 0`, this was received from `ShowWindow` or `ShowWindowAsync`
+            if lparam == 0 {
+                user_data(hwnd).window_style.visible = wparam != 0;
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        },
+
         WM_NCCREATE => {
             // `lpCreateParams` is the first member, so `CREATESTRUCTW *` is `WindowCreateParams **`
             let params = &mut **(lparam as *const *mut WindowCreateParams);
 
             // Store user data pointer
-            let _ = set_window_data(hwnd, GWLP_USERDATA, params.user_data_ptr as usize);
+            let _ = set_window_data(hwnd, GWL_USERDATA, params.user_data_ptr as usize);
 
             let _ = params.builder_ptr;
 
@@ -507,6 +546,32 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
                 mem::drop(vec); // managed by `window_proc`, caller should `mem::forget`
             } else {
                 let _ = DefWindowProcW(hwnd, WM_SETTEXT, 0, util::WSTR_EMPTY.as_ptr() as LPARAM);
+            }
+            0
+        },
+
+        RAMEN_WM_SETCONTROLS => {
+            let mut user_data = user_data(hwnd);
+            let controls = {
+                let bits = wparam as u32;
+                if bits != !0 {
+                    Some(WindowControls::from_bits(bits))
+                } else {
+                    None
+                }
+            };
+            if user_data.window_style.controls != controls {
+                user_data.window_style.controls = controls;
+
+                let close = user_data.window_style.controls.as_ref().map(|c| c.close).unwrap_or(false);
+                util::set_close_button(hwnd, close);
+
+                let style = user_data.window_style.dword_style();
+                let style_ex = user_data.window_style.dword_style_ex();
+                let _ = set_window_data(hwnd, GWL_STYLE, style as usize);
+                let _ = set_window_data(hwnd, GWL_EXSTYLE, style_ex as usize);
+
+                util::ping_window_frame(hwnd);
             }
             0
         },

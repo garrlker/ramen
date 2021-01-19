@@ -19,6 +19,8 @@ pub struct Window {
 pub(crate) trait WindowImpl {
     fn events(&self) -> &[Event];
     fn execute(&self, f: &mut dyn FnMut());
+    fn set_controls(&self, controls: Option<WindowControls>);
+    fn set_controls_async(&self, controls: Option<WindowControls>);
     fn set_title(&self, title: &str);
     fn set_title_async(&self, title: &str);
     fn set_visible(&self, visible: bool);
@@ -72,6 +74,18 @@ impl Window {
         F: FnMut(&Self) + Send,
     {
         self.inner.execute(&mut move || f(self));
+    }
+
+    /// Sets the availability of the window controls.
+    ///  `None` indicates that no controls are desired.
+    #[inline]
+    pub fn set_controls(&self, controls: Option<WindowControls>) {
+        self.inner.set_controls(controls)
+    }
+
+    #[inline]
+    pub fn set_controls_async(&self, controls: Option<WindowControls>) {
+        self.inner.set_controls_async(controls)
     }
 
     /// Sets the text that appears in the title bar of the window.
@@ -274,6 +288,18 @@ impl WindowControls {
     /// Creates window controls with the minimize & close buttons available.
     pub const fn no_maximize() -> Self {
         Self::new(true, false, true)
+    }
+
+    pub(crate) fn to_bits(&self) -> u32 {
+        (self.minimize as u32) << 2 | (self.maximize as u32) << 1 | self.close as u32
+    }
+
+    pub(crate) fn from_bits(x: u32) -> Self {
+        Self {
+            minimize: x & (1 << 2) != 0,
+            maximize: x & (1 << 1) != 0,
+            close: x & 1 != 0,
+        }
     }
 }
 
