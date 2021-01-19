@@ -21,6 +21,8 @@ pub(crate) trait WindowImpl {
     fn execute(&self, f: &mut dyn FnMut());
     fn set_controls(&self, controls: Option<WindowControls>);
     fn set_controls_async(&self, controls: Option<WindowControls>);
+    fn set_resizable(&self, resizable: bool);
+    fn set_resizable_async(&self, resizable: bool);
     fn set_title(&self, title: &str);
     fn set_title_async(&self, title: &str);
     fn set_visible(&self, visible: bool);
@@ -86,6 +88,16 @@ impl Window {
     #[inline]
     pub fn set_controls_async(&self, controls: Option<WindowControls>) {
         self.inner.set_controls_async(controls)
+    }
+
+    #[inline]
+    pub fn set_resizable(&self, resizable: bool) {
+        self.inner.set_resizable(resizable)
+    }
+
+    #[inline]
+    pub fn set_resizable_async(&self, resizable: bool) {
+        self.inner.set_resizable_async(resizable)
     }
 
     /// Sets the text that appears in the title bar of the window.

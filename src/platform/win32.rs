@@ -28,9 +28,10 @@ const EVENT_BUF_INITIAL_SIZE: usize = 512;
 
 // Custom events
 const RAMEN_WM_EXECUTE: UINT = WM_USER + 0;
-const RAMEN_WM_CLOSE: UINT = WM_USER + 1;
+const RAMEN_WM_DESTROY: UINT = WM_USER + 1;
 const RAMEN_WM_SETTEXT_ASYNC: UINT = WM_USER + 2;
 const RAMEN_WM_SETCONTROLS: UINT = WM_USER + 3;
+const RAMEN_WM_SETTHICKFRAME: UINT = WM_USER + 4;
 
 #[derive(Debug)]
 pub struct InternalError {
@@ -115,7 +116,7 @@ struct WindowCreateParams {
 impl WindowStyle {
     /// Gets this style as a bitfield. Note that it does not include the close button.
     /// The close button is a menu property, not a window style.
-    pub fn dword_style(&self) -> DWORD {
+    pub(crate) fn dword_style(&self) -> DWORD {
         let mut style = 0;
 
         if self.borderless {
@@ -146,7 +147,7 @@ impl WindowStyle {
         style
     }
 
-    pub fn dword_style_ex(&self) -> DWORD {
+    pub(crate) fn dword_style_ex(&self) -> DWORD {
         let mut style = 0;
 
         if self.rtl_layout {
@@ -158,6 +159,15 @@ impl WindowStyle {
         }
 
         style
+    }
+
+    pub(crate) fn set_for(&self, hwnd: HWND) {
+        let style = self.dword_style();
+        let style_ex = self.dword_style_ex();
+        unsafe {
+            let _ = set_window_data(hwnd, GWL_STYLE, style as usize);
+            let _ = set_window_data(hwnd, GWL_EXSTYLE, style_ex as usize);
+        }
     }
 }
 
@@ -362,6 +372,7 @@ impl WindowImpl for Window {
         }
     }
 
+    #[inline]
     fn set_controls(&self, controls: Option<WindowControls>) {
         let controls = controls.map(|c| c.to_bits()).unwrap_or(!0);
         unsafe {
@@ -369,10 +380,25 @@ impl WindowImpl for Window {
         }
     }
 
+    #[inline]
     fn set_controls_async(&self, controls: Option<WindowControls>) {
         let controls = controls.map(|c| c.to_bits()).unwrap_or(!0);
         unsafe {
             let _ = PostMessageW(self.hwnd, RAMEN_WM_SETCONTROLS, controls as WPARAM, 0);
+        }
+    }
+
+    #[inline]
+    fn set_resizable(&self, resizable: bool) {
+        unsafe {
+            let _ = SendMessageW(self.hwnd, RAMEN_WM_SETTHICKFRAME, resizable as WPARAM, 0);
+        }
+    }
+
+    #[inline]
+    fn set_resizable_async(&self, resizable: bool) {
+        unsafe {
+            let _ = PostMessageW(self.hwnd, RAMEN_WM_SETTHICKFRAME, resizable as WPARAM, 0);
         }
     }
 
@@ -528,9 +554,9 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             0
         },
 
-        // Custom event: Close the window, but for real (`WM_CLOSE` is rejected always).
+        // Custom event: Destroy the window (`WM_CLOSE` & `DestroyWindow` are rejected normally).
         // wParam & lParam: Unused, set to zero.
-        RAMEN_WM_CLOSE => {
+        RAMEN_WM_DESTROY => {
             user_data(hwnd).destroy_flag.store(true, atomic::Ordering::Release);
             let _ = DestroyWindow(hwnd);
             0
@@ -550,6 +576,9 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             0
         },
 
+        // Custom event: Update window controls.
+        // wParam: If anything but !0 (~0 in C terms), window controls bits, else None.
+        // lParam: Unused, set to zero.
         RAMEN_WM_SETCONTROLS => {
             let mut user_data = user_data(hwnd);
             let controls = {
@@ -563,16 +592,27 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             if user_data.window_style.controls != controls {
                 user_data.window_style.controls = controls;
 
+                // Update system menu's close button if present
                 if let Some(close) = user_data.window_style.controls.as_ref().map(|c| c.close) {
                     util::set_close_button(hwnd, close);
                 }
 
-                let style = user_data.window_style.dword_style();
-                let style_ex = user_data.window_style.dword_style_ex();
-                let _ = set_window_data(hwnd, GWL_STYLE, style as usize);
-                let _ = set_window_data(hwnd, GWL_EXSTYLE, style_ex as usize);
-
+                // Set styles, refresh
+                user_data.window_style.set_for(hwnd);
                 util::ping_window_frame(hwnd);
+            }
+            0
+        },
+
+        // Custom event: Set whether the window is resizable.
+        // wParam: If non-zero, resizable, otherwise not resizable.
+        // lParam: Unused, set to zero.
+        RAMEN_WM_SETTHICKFRAME => {
+            let mut user_data = user_data(hwnd);
+            let resizable = wparam != 0;
+            if user_data.window_style.resizable != resizable {
+                user_data.window_style.resizable = resizable;
+                user_data.window_style.set_for(hwnd);
             }
             0
         },
@@ -584,7 +624,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
 impl ops::Drop for Window {
     fn drop(&mut self) {
         unsafe {
-            let _ = PostMessageW(self.hwnd, RAMEN_WM_CLOSE, 0, 0);
+            let _ = PostMessageW(self.hwnd, RAMEN_WM_DESTROY, 0, 0);
         }
         let _ = self.thread.take().map(thread::JoinHandle::join);
     }
