@@ -154,17 +154,17 @@ pub enum DpiMode {
 
 pub struct Win32 {
     /// Dynamically linked Win32 functions that might not be available on all systems.
-    dl: Win32DL,
+    pub dl: Win32DL,
 
     /// The DPI mode that's enabled process-wide. The newest available is selected.
     /// This is done at runtime, and not in the manifest, because that's incredibly stupid.
-    dpi_mode: DpiMode,
+    pub dpi_mode: DpiMode,
 
     // Cached version checks, as the system can't magically upgrade without restarting
-    at_least_vista: bool,
-    at_least_8_point_1: bool,
-    at_least_anniversary_update: bool,
-    at_least_creators_update: bool,
+    pub at_least_vista: bool,
+    pub at_least_8_point_1: bool,
+    pub at_least_anniversary_update: bool,
+    pub at_least_creators_update: bool,
 }
 
 impl Win32 {

@@ -354,11 +354,20 @@ dyn_link! {
     pub struct Win32DL(dlopen => HMODULE | GetProcAddress) {
         "Dwmapi.dll" {
             /// (Windows Vista+)
-            /// Advanced querying of window attributes from the desktop window manager.
+            /// Advanced querying of window attributes via the desktop window manager.
             fn DwmGetWindowAttribute(
                 hWnd: HWND,
                 dwAttribute: DWORD,
                 pvAttribute: LPVOID,
+                cbAttribute: DWORD,
+            ) -> HRESULT;
+
+            /// (Windows Vista+)
+            /// Advanced setting of window attributes via the desktop window manager.
+            fn DwmSetWindowAttribute(
+                hWnd: HWND,
+                dwAttribute: DWORD,
+                pvAttribute: LPCVOID,
                 cbAttribute: DWORD,
             ) -> HRESULT;
         },
