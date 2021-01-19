@@ -10,7 +10,7 @@ use crate::{
     helpers::{LazyCell, sync::{condvar_notify1, condvar_wait, mutex_lock, Condvar, Mutex}},
     window::{WindowBuilder, WindowControls, WindowImpl, WindowStyle},
 };
-use std::{cell, fmt, mem, ops, ptr, sync, thread};
+use std::{cell, fmt, mem, ops, ptr, sync::{self, atomic::{self, AtomicBool}}, thread};
 
 /// Global lock used to synchronize classes being registered or queried.
 static CLASS_REGISTRY_LOCK: LazyCell<Mutex<()>> = LazyCell::new(Default::default);
@@ -164,7 +164,7 @@ impl WindowStyle {
 struct WindowUserData {
     close_reason: Option<CloseReason>,
     event_queue: Mutex<Vec<Event>>,
-    destroy_flag: bool,
+    destroy_flag: AtomicBool,
     window_style: WindowStyle,
 }
 
@@ -173,7 +173,7 @@ impl Default for WindowUserData {
         Self {
             close_reason: None,
             event_queue: Mutex::new(Vec::with_capacity(EVENT_BUF_INITIAL_SIZE)),
-            destroy_flag: false,
+            destroy_flag: AtomicBool::new(false),
             window_style: Default::default(),
         }
     }
@@ -310,7 +310,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
             // This is one of the main motivations (besides no blocking) to give each window a thread.
             match GetMessageW(&mut msg, ptr::null_mut(), 0, 0) {
                 -1 => panic!("Hard error {:#06X} in GetMessageW loop!", GetLastError()),
-                0 => if (&*user_data_ptr).destroy_flag {
+                0 => if (&*user_data_ptr).destroy_flag.load(atomic::Ordering::Acquire) {
                     break 'message_loop
                 },
                 _ => {
@@ -439,7 +439,7 @@ unsafe extern "system" fn hcbt_destroywnd_hookproc(code: c_int, wparam: WPARAM, 
         if get_class_data(hwnd, GCL_CBCLSEXTRA) == mem::size_of::<usize>()
             && (get_class_data(hwnd, 0) as u32).to_le_bytes() == *HOOKPROC_MARKER
         {
-            if user_data(hwnd).destroy_flag {
+            if user_data(hwnd).destroy_flag.load(atomic::Ordering::Acquire) {
                 0 // Allow
             } else {
                 1 // Prevent
@@ -479,7 +479,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
         },
 
         WM_DESTROY => {
-            if user_data(hwnd).destroy_flag {
+            if user_data(hwnd).destroy_flag.load(atomic::Ordering::Acquire) {
                 PostQuitMessage(0);
             }
             0
@@ -531,7 +531,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
         // Custom event: Close the window, but for real (`WM_CLOSE` is rejected always).
         // wParam & lParam: Unused, set to zero.
         RAMEN_WM_CLOSE => {
-            user_data(hwnd).destroy_flag = true;
+            user_data(hwnd).destroy_flag.store(true, atomic::Ordering::Release);
             let _ = DestroyWindow(hwnd);
             0
         },
@@ -563,8 +563,9 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             if user_data.window_style.controls != controls {
                 user_data.window_style.controls = controls;
 
-                let close = user_data.window_style.controls.as_ref().map(|c| c.close).unwrap_or(false);
-                util::set_close_button(hwnd, close);
+                if let Some(close) = user_data.window_style.controls.as_ref().map(|c| c.close) {
+                    util::set_close_button(hwnd, close);
+                }
 
                 let style = user_data.window_style.dword_style();
                 let style_ex = user_data.window_style.dword_style_ex();
