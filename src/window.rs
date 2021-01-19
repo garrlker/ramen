@@ -133,6 +133,7 @@ impl WindowBuilder {
                 controls: Some(WindowControls::no_maximize()),
                 resizable: true,
                 visible: true,
+                rtl_layout: false,
 
                 #[cfg(windows)]
                 tool_window: false,
@@ -196,6 +197,14 @@ impl WindowBuilder {
     /// Defaults to `true`.
     pub fn resizable(&mut self, resizable: bool) -> &mut Self {
         self.style.resizable = resizable;
+        self
+    }
+
+    /// Sets whether the window controls and titlebar have a right-to-left layout.
+    ///
+    /// Defaults to `false`.
+    pub fn rtl_layout(&mut self, rtl_layout: bool) -> &mut Self {
+        self.style.rtl_layout = rtl_layout;
         self
     }
 
@@ -281,6 +290,7 @@ pub(crate) struct WindowStyle {
     pub resizable: bool,
     pub visible: bool,
     pub controls: Option<WindowControls>,
+    pub rtl_layout: bool,
 
     #[cfg(windows)]
     pub tool_window: bool,

@@ -80,12 +80,12 @@ unsafe impl Sync for Window {}
 ///     .build()?;
 /// ```
 pub trait WindowBuilderExt {
-    /// Sets whether the window uses the
-    /// [`WS_EX_TOOLWINDOW`](https://docs.microsoft.com/en-us/windows/win32/winmsg/extended-window-styles#WS_EX_TOOLWINDOW)
+    /// Sets whether the window uses the [`WS_EX_TOOLWINDOW`](
+    /// https://docs.microsoft.com/en-us/windows/win32/winmsg/extended-window-styles#WS_EX_TOOLWINDOW)
     /// style.
     ///
-    /// This is equivalent to the .NET
-    /// [`WindowStyle.ToolWindow`](https://docs.microsoft.com/en-us/dotnet/api/system.windows.windowstyle?view=net-5.0#System_Windows_WindowStyle_ToolWindow)
+    /// This is equivalent to the .NET [`WindowStyle.ToolWindow`](
+    /// https://docs.microsoft.com/en-us/dotnet/api/system.windows.windowstyle?view=net-5.0#System_Windows_WindowStyle_ToolWindow)
     /// property.
     ///
     /// From MSDN: *The window is intended to be used as a floating toolbar.*
@@ -147,6 +147,10 @@ impl WindowStyle {
 
     pub fn dword_style_ex(&self) -> DWORD {
         let mut style = 0;
+
+        if self.rtl_layout {
+            style |= WS_EX_LAYOUTRTL;
+        }
 
         if self.tool_window {
             style |= WS_EX_TOOLWINDOW;
