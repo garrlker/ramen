@@ -3,6 +3,15 @@ name = "ramen"
 version = "0.1.0"
 authors = ["viri <hi@viri.moe>"]
 edition = "2018"
+# description = "breh"
+documentation = "https://docs.rs/ramen"
+readme = "README.md"
+# homepage = "https://some.website/ramen"
+repository = "https://github.com/notviri/ramen/"
+license = "Zlib"
+# keywords = []
+# categories = []
+include = ["src/**/*.rs", "Cargo.toml", "LICENSE.md"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
