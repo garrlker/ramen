@@ -1,6 +1,6 @@
 [package]
 name = "ramen"
-version = "0.1.0"
+version = "0.0.2"
 authors = ["viri <hi@viri.moe>"]
 edition = "2018"
 # description = "breh"
