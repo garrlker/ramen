@@ -79,22 +79,25 @@ impl Window {
     }
 
     /// Sets the availability of the window controls.
-    ///  `None` indicates that no controls are desired.
+    ///  `None` indicates that no control menu is desired.
     #[inline]
     pub fn set_controls(&self, controls: Option<WindowControls>) {
         self.inner.set_controls(controls)
     }
 
+    /// Non-blocking variant of [`set_controls`](Self::set_controls).
     #[inline]
     pub fn set_controls_async(&self, controls: Option<WindowControls>) {
         self.inner.set_controls_async(controls)
     }
 
+    /// Sets whether the window is resizable by dragging the edges.
     #[inline]
     pub fn set_resizable(&self, resizable: bool) {
         self.inner.set_resizable(resizable)
     }
 
+    /// Non-blocking variant of [`set_resizable`](Self::set_resizable).
     #[inline]
     pub fn set_resizable_async(&self, resizable: bool) {
         self.inner.set_resizable_async(resizable)
@@ -103,7 +106,7 @@ impl Window {
     /// Sets the text that appears in the title bar of the window.
     ///
     /// Note that if the window is borderless, fullscreen, or simply has no title bar,
-    /// the change will not be visible.
+    /// the change will not be visible.\
     /// It will however persist for when the style is changed to later include a title bar.
     #[inline]
     pub fn set_title(&self, title: &str) {
@@ -201,7 +204,8 @@ impl WindowBuilder {
         self
     }
 
-    /// Sets the initial window controls. `None` indicates that no controls are desired.
+    /// Sets the initial window controls.
+    /// `None` indicates that no control menu is desired.
     ///
     /// Defaults to [`WindowControls::no_maximize`].
     pub fn controls(&mut self, controls: Option<WindowControls>) -> &mut Self {
