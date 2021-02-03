@@ -141,6 +141,7 @@ pub const WM_CLOSE: UINT = 0x0010;
 pub const WM_SHOWWINDOW: UINT = 0x0018;
 pub const WM_NCCREATE: UINT = 0x0081;
 pub const WM_NCDESTROY: UINT = 0x0082;
+pub const WM_SYSCOMMAND: UINT = 0x0112;
 pub const WM_USER: UINT = 0x0400;
 pub const WS_BORDER: DWORD = 0x00800000;
 pub const WS_CAPTION: DWORD = 0x00C00000;

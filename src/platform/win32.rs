@@ -591,6 +591,14 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             DefWindowProcW(hwnd, msg, wparam, lparam)
         },
 
+        // Received when the user selects a window control.
+        WM_SYSCOMMAND => {
+            if wparam == SC_CLOSE {
+                user_data(hwnd).close_reason = Some(CloseReason::SystemMenu);
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        },
+
         // Custom event: Run arbitrary functions.
         // wParam: Function pointer of type `*mut &mut dyn FnMut()`.
         // lParam: Unused, set to zero.
