@@ -173,8 +173,9 @@ impl WindowStyle {
 
 struct WindowUserData {
     close_reason: Option<CloseReason>,
-    event_queue: Mutex<Vec<Event>>,
     destroy_flag: AtomicBool,
+    event_queue: Mutex<Vec<Event>>,
+    focus_state: AtomicBool,
     window_style: WindowStyle,
 }
 
@@ -182,8 +183,9 @@ impl Default for WindowUserData {
     fn default() -> Self {
         Self {
             close_reason: None,
-            event_queue: Mutex::new(Vec::with_capacity(EVENT_BUF_INITIAL_SIZE)),
             destroy_flag: AtomicBool::new(false),
+            event_queue: Mutex::new(Vec::with_capacity(EVENT_BUF_INITIAL_SIZE)),
+            focus_state: AtomicBool::new(false),
             window_style: Default::default(),
         }
     }
@@ -415,7 +417,7 @@ impl WindowImpl for Window {
         // You can't actually call it asynchronously, in case it's being sent from a different process.
         // Only if they had Rust back then, this poorly documented stupid detail would not exist,
         // as trying to use PostMessageW with WM_SETTEXT silently fails because it's scared of lifetimes.
-        // As a workaround, we just define our own event, X_WM_SET_TITLE_ASYNC, and still support WM_SETTEXT.
+        // As a workaround, we just define our own event, WM_SETTEXT_ASYNC, and still support WM_SETTEXT.
         // This is better than using the "unused parameter" in WM_SETTEXT anyways.
         // More info: https://devblogs.microsoft.com/oldnewthing/20110916-00/?p=9623
         let mut wstr: Vec<WCHAR> = Vec::new();
@@ -487,6 +489,11 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
     }
 
     match msg {
+        // No-op event with various uses such as pinging the event loop.
+        WM_NULL => 0,
+
+        // Init event, completed *before* `CreateWindowExW` returns, but *after* `WM_NCCREATE`.
+        // Return 0 to continue creation or -1 to destroy and return NULL from `CreateWindowExW`.
         WM_CREATE => {
             // `lpCreateParams` is the first member, so `CREATESTRUCTW *` is `WindowCreateParams **`
             let params = &mut **(lparam as *const *mut WindowCreateParams);
@@ -501,13 +508,54 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             // Copy style
             user_data.window_style = builder.style.clone();
 
-            0
+            0 // OK
         },
 
+        // Received as the window is being destroyed after it has been removed from the screen.
+        // Nothing can be done once this stage is hit naturally, which is why the CBT hook exists.
         WM_DESTROY => {
             if user_data(hwnd).destroy_flag.load(atomic::Ordering::Acquire) {
                 PostQuitMessage(0);
             }
+            0
+        },
+
+        // Received after the window has been moved, sent from DefWndProc's `WM_WINDOWPOSCHANGED`.
+        // Since the window is on its own thread, this won't block and is just instead sent 1000 times.
+        WM_MOVE => {
+            // TODO: Do it
+            0
+        },
+
+        // << Event 0x0004 non-existent >>
+
+        // Received *after* the window has been resized, sent from DefWndProc's `WM_WINDOWPOSCHANGED`.
+        WM_SIZE => {
+            // TODO: Do it
+            0
+        },
+
+        // Received when the window loses or gains focus.
+        WM_ACTIVATE => {
+            let user_data = user_data(hwnd);
+
+            // Quoting MSDN:
+            // The high-order word specifies the minimized state of the window being activated
+            // or deactivated. A nonzero value indicates the window is minimized.
+            //
+            // So, if we don't do some logic here we get two events on unfocusing
+            // by clicking on the taskbar icon for example, among other things:
+            // 1) WM_INACTIVE (HIWORD == 0)
+            // 2) WM_ACTIVATE (HIWORD != 0)
+            // Note that the second event means focused & minimized at the same time. Fantastic.
+            let focus = wparam & 0xFFFF != 0;
+            let is_minimize = (wparam >> 16) & 0xFFFF != 0;
+            match (focus, is_minimize) {
+                (true, true) => return 0, // nonsense
+                (state, _) => push_event(user_data, Event::Focus(state)),
+            }
+            user_data.focus_state.store(focus, atomic::Ordering::Release);
+
             0
         },
 

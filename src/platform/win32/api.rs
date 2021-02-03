@@ -129,8 +129,13 @@ pub const VER_MINORVERSION: DWORD = 0x0000001;
 pub const VER_SERVICEPACKMAJOR: DWORD = 0x0000020;
 pub const VER_SERVICEPACKMINOR: DWORD = 0x0000010;
 pub const WH_CBT: c_int = 5;
+pub const WM_NULL: UINT = 0x0000;
 pub const WM_CREATE: UINT = 0x0001;
 pub const WM_DESTROY: UINT = 0x0002;
+pub const WM_MOVE: UINT = 0x0003;
+// !! no 0x0004 event !!
+pub const WM_SIZE: UINT = 0x0005;
+pub const WM_ACTIVATE: UINT = 0x0006;
 pub const WM_SETTEXT: UINT = 0x000C;
 pub const WM_CLOSE: UINT = 0x0010;
 pub const WM_SHOWWINDOW: UINT = 0x0018;
