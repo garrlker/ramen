@@ -395,6 +395,7 @@ impl WindowImpl for Window {
         }
     }
 
+    #[cfg(feature = "cursor-lock")]
     #[inline]
     fn set_cursor_lock(&self, mode: Option<CursorLock>) {
         let mode = mode.map(|e| e as u32).unwrap_or(0);
@@ -403,6 +404,7 @@ impl WindowImpl for Window {
         }
     }
 
+    #[cfg(feature = "cursor-lock")]
     #[inline]
     fn set_cursor_lock_async(&self, mode: Option<CursorLock>) {
         let mode = mode.map(|e| e as u32).unwrap_or(0);
@@ -678,6 +680,8 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
                 }
                 user_data.cursor_constrain_escaped = false;
             }
+
+            let _ = user_data; // soon used
 
             0
         },
