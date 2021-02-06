@@ -467,15 +467,18 @@ unsafe extern "system" fn hcbt_destroywnd_hookproc(code: c_int, wparam: WPARAM, 
         if get_class_data(hwnd, GCL_CBCLSEXTRA) == mem::size_of::<usize>()
             && (get_class_data(hwnd, 0) as u32).to_le_bytes() == *HOOKPROC_MARKER
         {
+            // Note that nothing is forwarded here, we decide for our windows
             if user_data(hwnd).destroy_flag.load(atomic::Ordering::Acquire) {
                 0 // Allow
             } else {
                 1 // Prevent
             }
         } else {
-            0 // Allow (disallow further hooks on HCBT_DESTROYWND)
+            // Unrelated window, forward
+            CallNextHookEx(ptr::null_mut(), code, wparam, lparam)
         }
     } else {
+        // Unrelated event, forward
         CallNextHookEx(ptr::null_mut(), code, wparam, lparam)
     }
 }
