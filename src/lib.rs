@@ -7,6 +7,7 @@
 //! with the [`parking_lot`](https://crates.io/crates/parking_lot) crate.
 //! Highly recommended, at least for release builds.
 
+#![cfg_attr(feature = "nightly-docs", feature(doc_cfg))]
 #![deny(unused_results)]
 
 #[doc(hidden)]

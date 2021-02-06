@@ -13,6 +13,8 @@ use std::borrow::Cow;
 ///
 /// [`cursor_lock`]: WindowBuilder::cursor_lock
 /// [`set_cursor_lock`]: Window::set_cursor_lock
+#[cfg_attr(feature = "nightly-docs", doc(cfg(feature = "cursor-lock")))]
+#[cfg_attr(not(feature = "nightly-docs"), cfg(feature = "cursor-lock"))]
 #[derive(Copy, Clone, Debug)]
 #[repr(u32)]
 pub enum CursorLock {
@@ -184,6 +186,7 @@ impl Window {
 #[derive(Clone)]
 pub struct WindowBuilder {
     pub(crate) class_name: MaybeStatic<str>,
+    #[cfg(feature = "cursor-lock")]
     pub(crate) cursor_lock: Option<CursorLock>,
     pub(crate) inner_size: Size,
     pub(crate) style: WindowStyle,
@@ -194,6 +197,7 @@ impl WindowBuilder {
     pub(crate) const fn new() -> Self {
         Self {
             class_name: MaybeStatic::Static("ramen_window_class"),
+            #[cfg(feature = "cursor-lock")]
             cursor_lock: None,
             inner_size: Size::Logical(800.0, 608.0),
             style: WindowStyle {

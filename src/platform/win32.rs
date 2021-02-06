@@ -8,9 +8,12 @@ use crate::{
     error::Error,
     event::{CloseReason, Event},
     helpers::{LazyCell, sync::{condvar_notify1, condvar_wait, mutex_lock, Condvar, Mutex}},
-    window::{CursorLock, WindowBuilder, WindowControls, WindowImpl, WindowStyle},
+    window::{WindowBuilder, WindowControls, WindowImpl, WindowStyle},
 };
 use std::{cell, fmt, mem, ops, ptr, sync::{self, atomic::{self, AtomicBool}}, thread};
+
+#[cfg(feature = "cursor-lock")]
+use crate::window::CursorLock;
 
 /// Global lock used to synchronize classes being registered or queried.
 static CLASS_REGISTRY_LOCK: LazyCell<Mutex<()>> = LazyCell::new(Default::default);
@@ -32,6 +35,7 @@ const RAMEN_WM_DESTROY: UINT = WM_USER + 1;
 const RAMEN_WM_SETTEXT_ASYNC: UINT = WM_USER + 2;
 const RAMEN_WM_SETCONTROLS: UINT = WM_USER + 3;
 const RAMEN_WM_SETTHICKFRAME: UINT = WM_USER + 4;
+#[cfg(feature = "cursor-lock")]
 const RAMEN_WM_SETCURSORLOCK: UINT = WM_USER + 5;
 
 #[derive(Debug)]
@@ -175,6 +179,7 @@ impl WindowStyle {
 struct WindowUserData {
     close_reason: Option<CloseReason>,
     cursor_constrain_escaped: bool,
+    #[cfg(feature = "cursor-lock")]
     cursor_lock: Option<CursorLock>,
     destroy_flag: AtomicBool,
     event_queue: Mutex<Vec<Event>>,
@@ -187,6 +192,7 @@ impl Default for WindowUserData {
         Self {
             close_reason: None,
             cursor_constrain_escaped: false,
+            #[cfg(feature = "cursor-lock")]
             cursor_lock: None,
             destroy_flag: AtomicBool::new(false),
             event_queue: Mutex::new(Vec::with_capacity(EVENT_BUF_INITIAL_SIZE)),
@@ -533,7 +539,10 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
 
             // Copy style, cursor lock mode, etc
             user_data.window_style = builder.style.clone();
-            user_data.cursor_lock = builder.cursor_lock;
+            #[cfg(feature = "cursor-lock")]
+            {
+                user_data.cursor_lock = builder.cursor_lock;
+            }
 
             0 // OK
         },
@@ -689,9 +698,12 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
         // MSDN: Sent one time to a window, after it has exited the moving or sizing modal loop.
         // wParam & lParam are unused.
         WM_EXITSIZEMOVE => {
-            let user_data = user_data(hwnd);
-            if user_data.cursor_lock.is_some() {
-                util::update_cursor_lock(hwnd, user_data.cursor_lock, false);
+            #[cfg(feature = "cursor-lock")]
+            {
+                let user_data = user_data(hwnd);
+                if user_data.cursor_lock.is_some() {
+                    util::update_cursor_lock(hwnd, user_data.cursor_lock, false);
+                }
             }
             0
         },
@@ -773,6 +785,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
         // Custom event: Set the cursor lock.
         // wParam: If non-zero, a `CursorLock` variant, else `None`.
         // lParam: Unused, set to zero.
+        #[cfg(feature = "cursor-lock")]
         RAMEN_WM_SETCURSORLOCK => {
             let mut user_data = user_data(hwnd);
             if wparam != 0 {

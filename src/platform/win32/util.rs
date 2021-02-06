@@ -1,6 +1,9 @@
 use super::api::*;
-use crate::{monitor::Size, window::CursorLock};
+use crate::{monitor::Size};
 use std::{mem, ptr, slice};
+
+#[cfg(feature = "cursor-lock")]
+use crate::window::CursorLock;
 
 /// The base DPI at 100% scaling
 pub const BASE_DPI: UINT = 96;
@@ -182,6 +185,8 @@ pub unsafe fn client_area_screen_space(hwnd: HWND) -> RECT {
     client_area
 }
 
+
+#[cfg(feature = "cursor-lock")]
 pub unsafe fn update_cursor_lock(hwnd: HWND, kind: Option<CursorLock>, new: bool) {
     match kind {
         Some(CursorLock::Constrain) => {

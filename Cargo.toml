@@ -22,7 +22,8 @@ version = "0.11"
 [features]
 default = []
 cursor-lock = []
+nightly-docs = []
 parking-lot = ["parking_lot"]
 
 [package.metadata.docs.rs]
-features = ["nightly-docs"]
+features = ["cursor-lock", "nightly-docs"]
