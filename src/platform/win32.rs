@@ -619,7 +619,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
                     } else {
                         util::update_cursor_lock(hwnd, user_data.cursor_lock, false);
                     }
-                } else {
+                } else if matches!(user_data.cursor_lock, Some(CursorLock::Constrain)) {
                     util::update_cursor_lock(hwnd, None, true);
                 }
             }
