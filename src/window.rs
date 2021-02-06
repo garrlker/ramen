@@ -14,6 +14,7 @@ use std::borrow::Cow;
 /// [`cursor_lock`]: WindowBuilder::cursor_lock
 /// [`set_cursor_lock`]: Window::set_cursor_lock
 #[derive(Copy, Clone, Debug)]
+#[repr(u32)]
 pub enum CursorLock {
     // DEV NOTE: Don't make a variant repr 0. That's used for `None` in impls.
 

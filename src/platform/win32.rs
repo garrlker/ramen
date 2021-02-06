@@ -32,6 +32,7 @@ const RAMEN_WM_DESTROY: UINT = WM_USER + 1;
 const RAMEN_WM_SETTEXT_ASYNC: UINT = WM_USER + 2;
 const RAMEN_WM_SETCONTROLS: UINT = WM_USER + 3;
 const RAMEN_WM_SETTHICKFRAME: UINT = WM_USER + 4;
+const RAMEN_WM_SETCURSORLOCK: UINT = WM_USER + 5;
 
 #[derive(Debug)]
 pub struct InternalError {
@@ -394,14 +395,20 @@ impl WindowImpl for Window {
         }
     }
 
+    #[inline]
     fn set_cursor_lock(&self, mode: Option<CursorLock>) {
-        let _ = mode;
-        unimplemented!()
+        let mode = mode.map(|e| e as u32).unwrap_or(0);
+        unsafe {
+            let _ = SendMessageW(self.hwnd, RAMEN_WM_SETCURSORLOCK, mode as WPARAM, 0);
+        }
     }
 
+    #[inline]
     fn set_cursor_lock_async(&self, mode: Option<CursorLock>) {
-        let _ = mode;
-        unimplemented!()
+        let mode = mode.map(|e| e as u32).unwrap_or(0);
+        unsafe {
+            let _ = PostMessageW(self.hwnd, RAMEN_WM_SETCURSORLOCK, mode as WPARAM, 0);
+        }
     }
 
     #[inline]
@@ -756,6 +763,20 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
                 user_data.window_style.resizable = resizable;
                 user_data.window_style.set_for(hwnd);
             }
+            0
+        },
+
+        // Custom event: Set the cursor lock.
+        // wParam: If non-zero, a `CursorLock` variant, else `None`.
+        // lParam: Unused, set to zero.
+        RAMEN_WM_SETCURSORLOCK => {
+            let mut user_data = user_data(hwnd);
+            if wparam != 0 {
+                user_data.cursor_lock = Some(mem::transmute::<_, CursorLock>(wparam as u32));
+            } else {
+                user_data.cursor_lock = None;
+            }
+            util::update_cursor_lock(hwnd, user_data.cursor_lock, true);
             0
         },
 
