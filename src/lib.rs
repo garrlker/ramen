@@ -1,4 +1,11 @@
-//! A neat windowing library.
+//! A cross-platform windowing crate, built for performance.
+//!
+//! # Features
+//! - `cursor-lock`: Adds the ability to constrain the cursor
+//! to the inner bounds of the window or lock it to the center.
+//! - `parking-lot`: Replaces the `std` for synchronization primitives
+//! with the [`parking_lot`](https://crates.io/crates/parking_lot) crate.
+//! Highly recommended, at least for release builds.
 
 #![deny(unused_results)]
 
