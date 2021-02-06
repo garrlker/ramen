@@ -205,6 +205,7 @@ pub unsafe fn update_cursor_lock(hwnd: HWND, kind: Option<CursorLock>, new: bool
     }
 }
 
+#[cfg(feature = "cursor-lock")]
 pub unsafe fn is_cursor_in_titlebar(hwnd: HWND) -> bool {
     let mut title_bar: TITLEBARINFO = mem::zeroed();
     title_bar.cbSize = mem::size_of_val(&title_bar) as DWORD;

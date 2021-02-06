@@ -178,6 +178,7 @@ impl WindowStyle {
 
 struct WindowUserData {
     close_reason: Option<CloseReason>,
+    #[cfg(feature = "cursor-lock")]
     cursor_constrain_escaped: bool,
     #[cfg(feature = "cursor-lock")]
     cursor_lock: Option<CursorLock>,
@@ -191,6 +192,7 @@ impl Default for WindowUserData {
     fn default() -> Self {
         Self {
             close_reason: None,
+            #[cfg(feature = "cursor-lock")]
             cursor_constrain_escaped: false,
             #[cfg(feature = "cursor-lock")]
             cursor_lock: None,
