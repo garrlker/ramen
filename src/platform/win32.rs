@@ -586,6 +586,15 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
 
             let _ = params.builder_ptr;
 
+            // Enable the non-client scaling patch for PMv1
+            let win32 = WIN32.get();
+            if matches!(win32.dpi_mode, util::DpiMode::PerMonitorV1) && win32.at_least_anniversary_update {
+                if let Some(FALSE) | None = win32.dl.EnableNonClientDpiScaling(hwnd) {
+                    // TODO: do something other than panicking, write the error
+                    panic!("Failed to enable non-client DPI scaling on Win10 v1607+!");
+                }
+            }
+
             DefWindowProcW(hwnd, msg, wparam, lparam)
         },
 
