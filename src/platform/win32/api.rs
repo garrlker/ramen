@@ -64,6 +64,7 @@ pub type LPWSTR = *mut WCHAR;
 pub type LRESULT = LONG_PTR;
 pub type NTSTATUS = LONG;
 pub type PROCESS_DPI_AWARENESS = u32;
+pub type SHORT = c_short;
 pub type UINT = c_uint;
 pub type UINT_PTR = usize;
 pub type ULONG_PTR = usize;
@@ -79,6 +80,7 @@ pub type WNDPROC = unsafe extern "system" fn(HWND, UINT, WPARAM, LPARAM) -> LRES
 // Constants
 pub const _WIN32_WINNT_VISTA: WORD = 0x0600;
 pub const _WIN32_WINNT_WINBLUE: WORD = 0x0603;
+pub const CCHILDREN_TITLEBAR: usize = 5;
 pub const CP_UTF8: DWORD = 65001;
 pub const CS_OWNDC: UINT = 0x0020;
 pub const CW_USEDEFAULT: c_int = 0x80000000;
@@ -104,6 +106,7 @@ pub const PROCESS_SYSTEM_DPI_AWARE: PROCESS_DPI_AWARENESS = 1;
 pub const SUBLANG_DEFAULT: USHORT = 0x01;
 pub const S_OK: HRESULT = 0;
 pub const SC_CLOSE: WPARAM = 0xF060;
+pub const SM_SWAPBUTTON: c_int = 23;
 pub const SW_HIDE: c_int = 0;
 pub const SW_SHOW: c_int = 5;
 pub const SWP_ASYNCWINDOWPOS: UINT = 0x4000;
@@ -131,12 +134,12 @@ pub const VER_SERVICEPACKMINOR: DWORD = 0x0000010;
 pub const WH_CBT: c_int = 5;
 pub const WM_NULL: UINT = 0x0000;
 pub const WM_CREATE: UINT = 0x0001;
+pub const WM_EXITSIZEMOVE: UINT = 0x0232;
 pub const WM_DESTROY: UINT = 0x0002;
-pub const WM_MOVE: UINT = 0x0003;
-// !! no 0x0004 event !!
 pub const WM_SIZE: UINT = 0x0005;
 pub const WM_ACTIVATE: UINT = 0x0006;
 pub const WM_SETTEXT: UINT = 0x000C;
+pub const WM_MOVE: UINT = 0x0003;
 pub const WM_CLOSE: UINT = 0x0010;
 pub const WM_SHOWWINDOW: UINT = 0x0018;
 pub const WM_NCCREATE: UINT = 0x0081;
@@ -159,6 +162,7 @@ pub const WS_MAXIMIZE: DWORD = 0x01000000;
 pub const WS_MAXIMIZEBOX: DWORD = 0x00010000;
 pub const WS_MINIMIZE: DWORD = 0x20000000;
 pub const WS_MINIMIZEBOX: DWORD = 0x00020000;
+pub const WM_MOUSEMOVE: UINT = 0x0200;
 pub const WS_OVERLAPPED: DWORD = 0x00000000;
 pub const WS_OVERLAPPEDWINDOW: DWORD =
     WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
@@ -207,6 +211,12 @@ pub struct OSVERSIONINFOEXW {
     pub wSuiteMask: WORD,
     pub wProductType: BYTE,
     pub wReserved: BYTE,
+}
+#[repr(C)]
+pub struct TITLEBARINFO {
+    pub cbSize: DWORD,
+    pub rcTitleBar: RECT,
+    pub rgstate: [DWORD; CCHILDREN_TITLEBAR + 1],
 }
 #[repr(C)]
 pub struct WNDCLASSEXW {
@@ -287,6 +297,9 @@ extern "system" {
         lpParam: LPVOID,
     ) -> HWND;
     pub fn AdjustWindowRectEx(lpRect: *mut RECT, dwStyle: DWORD, bMenu: BOOL, dwExStyle: DWORD) -> BOOL;
+    pub fn ClientToScreen(hWnd: HWND, lpPoint: *mut POINT) -> BOOL;
+    pub fn GetClientRect(hWnd: HWND, lpRect: *mut RECT) -> BOOL;
+    pub fn GetTitleBarInfo(hwnd: HWND, pti: *mut TITLEBARINFO) -> BOOL;
     pub fn SetWindowPos(hWnd: HWND, hWndInsertAfter: HWND, X: c_int, Y: c_int, cx: c_int, cy: c_int, uFlags: UINT) -> BOOL;
     pub fn DestroyWindow(hWnd: HWND) -> BOOL;
 
@@ -307,9 +320,22 @@ extern "system" {
     pub fn ShowWindow(hWnd: HWND, nCmdShow: c_int) -> BOOL;
     pub fn ShowWindowAsync(hWnd: HWND, nCmdShow: c_int) -> BOOL;
 
+    // Keyboard & mouse related
+    pub fn ClipCursor(lpRect: *const RECT) -> BOOL;
+    pub fn SetCursorPos(X: c_int, Y: c_int) -> BOOL;
+    pub fn GetCursorPos(lpPoint: *mut POINT) -> BOOL;
+    pub fn SetCapture(hWnd: HWND) -> HWND;
+    pub fn GetCapture() -> HWND;
+    pub fn ReleaseCapture() -> BOOL;
+    pub fn GetAsyncKeyState(vKey: c_int) -> SHORT;
+    pub fn GetSystemMetrics(nIndex: c_int) -> c_int;
+
     // Misc legacy garbage
     pub fn EnableMenuItem(hMenu: HMENU, uIDEnableItem: UINT, uEnable: UINT) -> BOOL;
     pub fn GetSystemMenu(hWnd: HWND, bRevert: BOOL) -> HMENU;
+
+    // Why is this in User32
+    pub fn PtInRect(lprc: *const RECT, pt: POINT) -> BOOL;
 
     // Class/window storage manipulation
     pub fn GetClassLongW(hWnd: HWND, nIndex: c_int) -> DWORD;

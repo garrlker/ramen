@@ -1,5 +1,5 @@
 use super::api::*;
-use crate::monitor::Size;
+use crate::{monitor::Size, window::CursorLock};
 use std::{mem, ptr, slice};
 
 /// The base DPI at 100% scaling
@@ -172,6 +172,41 @@ pub unsafe fn ping_window_frame(hwnd: HWND) {
 #[inline]
 pub fn rect_to_size2d(rect: &RECT) -> (LONG, LONG) {
     (rect.right - rect.left, rect.bottom - rect.top)
+}
+
+pub unsafe fn client_area_screen_space(hwnd: HWND) -> RECT {
+    let mut client_area: RECT = mem::zeroed();
+    let _ = GetClientRect(hwnd, &mut client_area);
+    let _ = ClientToScreen(hwnd, (&mut client_area.left) as *mut _ as *mut POINT);
+    let _ = ClientToScreen(hwnd, (&mut client_area.right) as *mut _ as *mut POINT);
+    client_area
+}
+
+pub unsafe fn update_cursor_lock(hwnd: HWND, kind: Option<CursorLock>, new: bool) {
+    match kind {
+        Some(CursorLock::Constrain) => {
+            let client_area = client_area_screen_space(hwnd);
+            let _ = ClipCursor(&client_area);
+        },
+        Some(CursorLock::Center) => {
+            let client_area = client_area_screen_space(hwnd);
+            let (width, height) = rect_to_size2d(&client_area);
+            let _ = SetCursorPos(client_area.left + (width / 2), client_area.top + (height / 2));
+        },
+        None if new => {
+            let _ = ClipCursor(ptr::null());
+        },
+        None => (),
+    }
+}
+
+pub unsafe fn is_cursor_in_titlebar(hwnd: HWND) -> bool {
+    let mut title_bar: TITLEBARINFO = mem::zeroed();
+    title_bar.cbSize = mem::size_of_val(&title_bar) as DWORD;
+    let _ = GetTitleBarInfo(hwnd, &mut title_bar);
+    let mut mouse_pos: POINT = mem::zeroed();
+    let _ = GetCursorPos(&mut mouse_pos);
+    PtInRect(&title_bar.rcTitleBar, POINT { ..mouse_pos }) != 0
 }
 
 pub enum DpiMode {

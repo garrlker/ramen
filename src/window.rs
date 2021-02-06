@@ -9,6 +9,22 @@ use crate::{
 };
 use std::borrow::Cow;
 
+/// The type of cursor lock to use for [`cursor_lock`] / [`set_cursor_lock`].
+///
+/// [`cursor_lock`]: WindowBuilder::cursor_lock
+/// [`set_cursor_lock`]: Window::set_cursor_lock
+#[derive(Copy, Clone, Debug)]
+pub enum CursorLock {
+    // DEV NOTE: Don't make a variant repr 0. That's used for `None` in impls.
+
+    /// The cursor is constrained to the inner area of the window.
+    Constrain = 1,
+
+    /// The cursor is snapped to the center of the window.
+    /// Typical setting for games where you move the view around with the mouse.
+    Center = 2,
+}
+
 /// Represents a window, of course.
 ///
 /// To create a window, use a [`builder`](Window::builder).
@@ -21,6 +37,10 @@ pub(crate) trait WindowImpl {
     fn execute(&self, f: &mut dyn FnMut());
     fn set_controls(&self, controls: Option<WindowControls>);
     fn set_controls_async(&self, controls: Option<WindowControls>);
+    #[cfg(feature = "cursor-lock")]
+    fn set_cursor_lock(&self, mode: Option<CursorLock>);
+    #[cfg(feature = "cursor-lock")]
+    fn set_cursor_lock_async(&self, mode: Option<CursorLock>);
     fn set_resizable(&self, resizable: bool);
     fn set_resizable_async(&self, resizable: bool);
     fn set_title(&self, title: &str);
@@ -91,6 +111,22 @@ impl Window {
         self.inner.set_controls_async(controls)
     }
 
+    /// Sets the cursor lock mode. See [`CursorLock`] for more info.
+    #[cfg_attr(feature = "nightly-docs", doc(cfg(feature = "cursor-lock")))]
+    #[cfg_attr(not(feature = "nightly-docs"), cfg(feature = "cursor-lock"))]
+    #[inline]
+    pub fn set_cursor_lock(&self, mode: Option<CursorLock>) {
+        self.inner.set_cursor_lock(mode)
+    }
+
+    /// Non-blocking variant of [`set_cursor_lock`](Self::set_cursor_lock).
+    #[cfg_attr(feature = "nightly-docs", doc(cfg(feature = "cursor-lock")))]
+    #[cfg_attr(not(feature = "nightly-docs"), cfg(feature = "cursor-lock"))]
+    #[inline]
+    pub fn set_cursor_lock_async(&self, mode: Option<CursorLock>) {
+        self.inner.set_cursor_lock_async(mode)
+    }
+
     /// Sets whether the window is resizable by dragging the edges.
     #[inline]
     pub fn set_resizable(&self, resizable: bool) {
@@ -147,6 +183,7 @@ impl Window {
 #[derive(Clone)]
 pub struct WindowBuilder {
     pub(crate) class_name: MaybeStatic<str>,
+    pub(crate) cursor_lock: Option<CursorLock>,
     pub(crate) inner_size: Size,
     pub(crate) style: WindowStyle,
     pub(crate) title: MaybeStatic<str>,
@@ -156,6 +193,7 @@ impl WindowBuilder {
     pub(crate) const fn new() -> Self {
         Self {
             class_name: MaybeStatic::Static("ramen_window_class"),
+            cursor_lock: None,
             inner_size: Size::Logical(800.0, 608.0),
             style: WindowStyle {
                 borderless: false,
@@ -181,6 +219,7 @@ impl WindowBuilder {
     /// Sets whether the window is initially without a border.
     ///
     /// Defaults to `false`.
+    #[inline]
     pub fn borderless(&mut self, borderless: bool) -> &mut Self {
         self.style.borderless = borderless;
         self
@@ -208,8 +247,17 @@ impl WindowBuilder {
     /// `None` indicates that no control menu is desired.
     ///
     /// Defaults to [`WindowControls::no_maximize`].
+    #[inline]
     pub fn controls(&mut self, controls: Option<WindowControls>) -> &mut Self {
         self.style.controls = controls;
+        self
+    }
+
+    #[cfg_attr(feature = "nightly-docs", doc(cfg(feature = "cursor-lock")))]
+    #[cfg_attr(not(feature = "nightly-docs"), cfg(feature = "cursor-lock"))]
+    #[inline]
+    pub fn cursor_lock(&mut self, mode: Option<CursorLock>) -> &mut Self {
+        self.cursor_lock = mode;
         self
     }
 
@@ -217,6 +265,7 @@ impl WindowBuilder {
     ///
     /// Defaults to `Size::Logical(800.0, 608.0)`.
     // TODO: explain "if physical no scaling" etc
+    #[inline]
     pub fn inner_size(&mut self, inner_size: Size) -> &mut Self {
         self.inner_size = inner_size;
         self
@@ -225,6 +274,7 @@ impl WindowBuilder {
     /// Sets whether the window is initially resizable.
     ///
     /// Defaults to `true`.
+    #[inline]
     pub fn resizable(&mut self, resizable: bool) -> &mut Self {
         self.style.resizable = resizable;
         self
@@ -233,6 +283,7 @@ impl WindowBuilder {
     /// Sets whether the window controls and titlebar have a right-to-left layout.
     ///
     /// Defaults to `false`.
+    #[inline]
     pub fn rtl_layout(&mut self, rtl_layout: bool) -> &mut Self {
         self.style.rtl_layout = rtl_layout;
         self
@@ -265,6 +316,7 @@ impl WindowBuilder {
     /// Sets whether the window is initially visible.
     ///
     /// Defaults to `true`.
+    #[inline]
     pub fn visible(&mut self, visible: bool) -> &mut Self {
         self.style.visible = visible;
         self

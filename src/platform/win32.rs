@@ -8,7 +8,7 @@ use crate::{
     error::Error,
     event::{CloseReason, Event},
     helpers::{LazyCell, sync::{condvar_notify1, condvar_wait, mutex_lock, Condvar, Mutex}},
-    window::{WindowBuilder, WindowControls, WindowImpl, WindowStyle},
+    window::{CursorLock, WindowBuilder, WindowControls, WindowImpl, WindowStyle},
 };
 use std::{cell, fmt, mem, ops, ptr, sync::{self, atomic::{self, AtomicBool}}, thread};
 
@@ -173,9 +173,11 @@ impl WindowStyle {
 
 struct WindowUserData {
     close_reason: Option<CloseReason>,
+    cursor_constrain_escaped: bool,
+    cursor_lock: Option<CursorLock>,
     destroy_flag: AtomicBool,
     event_queue: Mutex<Vec<Event>>,
-    focus_state: AtomicBool,
+    focus_state: bool,
     window_style: WindowStyle,
 }
 
@@ -183,9 +185,11 @@ impl Default for WindowUserData {
     fn default() -> Self {
         Self {
             close_reason: None,
+            cursor_constrain_escaped: false,
+            cursor_lock: None,
             destroy_flag: AtomicBool::new(false),
             event_queue: Mutex::new(Vec::with_capacity(EVENT_BUF_INITIAL_SIZE)),
-            focus_state: AtomicBool::new(false),
+            focus_state: false,
             window_style: Default::default(),
         }
     }
@@ -390,6 +394,16 @@ impl WindowImpl for Window {
         }
     }
 
+    fn set_cursor_lock(&self, mode: Option<CursorLock>) {
+        let _ = mode;
+        unimplemented!()
+    }
+
+    fn set_cursor_lock_async(&self, mode: Option<CursorLock>) {
+        let _ = mode;
+        unimplemented!()
+    }
+
     #[inline]
     fn set_resizable(&self, resizable: bool) {
         unsafe {
@@ -508,8 +522,9 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
                 util::set_close_button(hwnd, false);
             }
 
-            // Copy style
+            // Copy style, cursor lock mode, etc
             user_data.window_style = builder.style.clone();
+            user_data.cursor_lock = builder.cursor_lock;
 
             0 // OK
         },
@@ -557,7 +572,37 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
                 (true, true) => return 0, // nonsense
                 (state, _) => push_event(user_data, Event::Focus(state)),
             }
-            user_data.focus_state.store(focus, atomic::Ordering::Release);
+            user_data.focus_state = focus;
+
+            #[cfg(feature = "cursor-lock")]
+            {
+                // We need to update the cursor lock here, *if* we are cursor locking.
+                // Unfortunately if the user clicks the maximize/minimize/close button,
+                // locking yanks the mouse away from the button, while still setting capture,
+                // making us unable to detect it (in a reasonable, sane way, as far as I know).
+                // To make it worse, this doesn't even set `WM_CLICKACTIVE` for wParam of this message.
+                // As a compromise, we let the user drag the window around or click those buttons.
+                // This is `cursor_constrain_escaped`, a flag indicating we let the cursor escape.
+                // The lock is re-acquired naturally once the mouse re-enters the window.
+                if focus && user_data.cursor_lock.is_some() {
+                    unsafe fn m1_down() -> bool {
+                        let vk_primary = if GetSystemMetrics(SM_SWAPBUTTON) == 0 {
+                            1 // VK_LBUTTON
+                        } else {
+                            2 // VK_RBUTTON
+                        };
+                        (GetAsyncKeyState(vk_primary) >> 15) != 0
+                    }
+
+                    if m1_down() && util::is_cursor_in_titlebar(hwnd) {
+                        user_data.cursor_constrain_escaped = true;
+                    } else {
+                        util::update_cursor_lock(hwnd, user_data.cursor_lock, false);
+                    }
+                } else {
+                    util::update_cursor_lock(hwnd, None, true);
+                }
+            }
 
             0
         },
@@ -581,11 +626,6 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             // `lpCreateParams` is the first member, so `CREATESTRUCTW *` is `WindowCreateParams **`
             let params = &mut **(lparam as *const *mut WindowCreateParams);
 
-            // Store user data pointer
-            let _ = set_window_data(hwnd, GWL_USERDATA, params.user_data_ptr as usize);
-
-            let _ = params.builder_ptr;
-
             // Enable the non-client scaling patch for PMv1
             let win32 = WIN32.get();
             if matches!(win32.dpi_mode, util::DpiMode::PerMonitorV1) && win32.at_least_anniversary_update {
@@ -594,6 +634,9 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
                     panic!("Failed to enable non-client DPI scaling on Win10 v1607+!");
                 }
             }
+
+            // Store user data pointer
+            let _ = set_window_data(hwnd, GWL_USERDATA, params.user_data_ptr as usize);
 
             DefWindowProcW(hwnd, msg, wparam, lparam)
         },
@@ -609,6 +652,37 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
                 user_data(hwnd).close_reason = Some(CloseReason::SystemMenu);
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
+        },
+
+        // TODO: what do you think
+        WM_MOUSEMOVE => {
+            let user_data = user_data(hwnd);
+
+            #[cfg(feature = "cursor-lock")]
+            {
+                match user_data.cursor_lock {
+                    Some(CursorLock::Constrain) if user_data.cursor_constrain_escaped => {
+                        util::update_cursor_lock(hwnd, user_data.cursor_lock, false);
+                    },
+                    Some(CursorLock::Center) if user_data.focus_state => {
+                        util::update_cursor_lock(hwnd, user_data.cursor_lock, false);
+                    },
+                    _ => (),
+                }
+                user_data.cursor_constrain_escaped = false;
+            }
+
+            0
+        },
+
+        // MSDN: Sent one time to a window, after it has exited the moving or sizing modal loop.
+        // wParam & lParam are unused.
+        WM_EXITSIZEMOVE => {
+            let user_data = user_data(hwnd);
+            if user_data.cursor_lock.is_some() {
+                util::update_cursor_lock(hwnd, user_data.cursor_lock, false);
+            }
+            0
         },
 
         // Custom event: Run arbitrary functions.
