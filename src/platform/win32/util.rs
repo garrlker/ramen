@@ -253,13 +253,13 @@ impl Win32 {
             let at_least_creators_update = is_win10_ver_or_greater(&dl, 15063);
 
             let dpi_mode = if at_least_creators_update {
-                assert_eq!(dl.SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2), Some(TRUE));
+                let _ = dl.SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
                 DpiMode::PerMonitorV2
             } else if at_least_8_point_1 {
-                assert_eq!(dl.SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE), Some(S_OK));
+                let _ = dl.SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
                 DpiMode::PerMonitorV1
             } else if at_least_vista {
-                assert_ne!(dl.SetProcessDPIAware().unwrap_or(FALSE), FALSE);
+                let _ = dl.SetProcessDPIAware();
                 DpiMode::System
             } else {
                 DpiMode::Unsupported
