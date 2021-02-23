@@ -4,7 +4,7 @@ use crate::{
     error::Error,
     event::Event,
     helpers::MaybeStatic,
-    monitor::{/*Point,*/ Size},
+    monitor::{Scale, Size},
     platform::imp,
 };
 use std::borrow::Cow;
@@ -38,6 +38,7 @@ pub struct Window {
 pub(crate) trait WindowImpl {
     fn events(&self) -> &[Event];
     fn execute(&self, f: &mut dyn FnMut());
+    fn inner_size(&self) -> (Size, Scale);
     fn set_controls(&self, controls: Option<WindowControls>);
     fn set_controls_async(&self, controls: Option<WindowControls>);
     #[cfg(feature = "cursor-lock")]
@@ -99,6 +100,11 @@ impl Window {
         F: FnMut(&Self) + Send,
     {
         self.inner.execute(&mut move || f(self));
+    }
+
+    #[inline]
+    pub fn inner_size(&self) -> (Size, Scale) {
+        self.inner.inner_size()
     }
 
     /// Sets the availability of the window controls.

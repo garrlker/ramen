@@ -8,6 +8,7 @@ use crate::{
     error::Error,
     event::{CloseReason, Event},
     helpers::{LazyCell, sync::{condvar_notify1, condvar_wait, mutex_lock, Condvar, Mutex}},
+    monitor::{Scale, Size},
     window::{WindowBuilder, WindowControls, WindowImpl, WindowStyle},
 };
 use std::{cell, fmt, mem, ops, ptr, sync::{self, atomic::{self, AtomicBool}}, thread};
@@ -186,6 +187,16 @@ struct WindowUserData {
     event_queue: Mutex<Vec<Event>>,
     focus_state: bool,
     window_style: WindowStyle,
+
+    dpi_data: Mutex<WindowUserDpiData>,
+}
+
+#[derive(Default)]
+struct WindowUserDpiData {
+    client: (u32, u32),
+    dpi: UINT,
+    is_logical: bool,
+    scale_factor: f64,
 }
 
 impl Default for WindowUserData {
@@ -200,14 +211,12 @@ impl Default for WindowUserData {
             event_queue: Mutex::new(Vec::with_capacity(EVENT_BUF_INITIAL_SIZE)),
             focus_state: false,
             window_style: Default::default(),
+            dpi_data: Default::default(),
         }
     }
 }
 
 pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> {
-    // Force this so it panics the main thread if something somehow goes wrong
-    let _ = WIN32.get();
-
     // Condvar & mutex pair for receiving the `Result<WindowRepr, Error>` from spawned thread
     let signal = sync::Arc::new((Mutex::<Option<Result<WindowRepr, Error>>>::new(None), Condvar::new()));
 
@@ -387,6 +396,18 @@ impl WindowImpl for Window {
         }
     }
 
+    fn inner_size(&self) -> (Size, Scale) {
+        let lock = mutex_lock(&unsafe { &*self.user_data.get() }.dpi_data);
+        let (width, height) = lock.client;
+        let factor = lock.scale_factor;
+        let inner_size = Size::Physical(width, height);
+        if lock.is_logical {
+            (inner_size.to_logical(factor), factor)
+        } else {
+            (inner_size, factor)
+        }
+    }
+
     #[inline]
     fn set_controls(&self, controls: Option<WindowControls>) {
         let controls = controls.map(|c| c.to_bits()).unwrap_or(!0);
@@ -539,6 +560,19 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
                 util::set_close_button(hwnd, false);
             }
 
+            // TODO: Yeah, not this
+            let dpi = util::BASE_DPI;
+            let dpi_fac = dpi as f64 / util::BASE_DPI as f64;
+
+            let mut lock = mutex_lock(&user_data.dpi_data);
+            *lock = WindowUserDpiData {
+                client: builder.inner_size.physical(dpi_fac),
+                dpi: dpi,
+                is_logical: matches!(builder.inner_size, Size::Logical(..)),
+                scale_factor: dpi_fac,
+            };
+            mem::drop(lock);
+
             // Copy style, cursor lock mode, etc
             user_data.window_style = builder.style.clone();
             #[cfg(feature = "cursor-lock")]
@@ -649,10 +683,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             // Enable the non-client scaling patch for PMv1
             let win32 = WIN32.get();
             if matches!(win32.dpi_mode, util::DpiMode::PerMonitorV1) && win32.at_least_anniversary_update {
-                if let Some(FALSE) | None = win32.dl.EnableNonClientDpiScaling(hwnd) {
-                    // TODO: do something other than panicking, write the error
-                    panic!("Failed to enable non-client DPI scaling on Win10 v1607+!");
-                }
+                let _ = win32.dl.EnableNonClientDpiScaling(hwnd);
             }
 
             // Store user data pointer
