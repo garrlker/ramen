@@ -67,7 +67,8 @@ impl Window {
     /// To acquire new events, call [`swap_events`](Self::swap_events);
     /// repeated calls to this function will not advance the buffer.
     ///
-    /// ```rust
+    /// ```no_run
+    /// # let mut window = ramen::window::Window::builder().build().unwrap();
     /// loop {
     ///     for event in window.events() {
     ///         // process events!
@@ -88,7 +89,8 @@ impl Window {
     /// but rather a way to guarantee that native low-level calls are executed in the remote thread if necessary,
     /// especially on platforms like Win32 that make excessive use of thread globals.
     ///
-    /// ```rust
+    /// ```no_run
+    /// # let window = ramen::window::Window::builder().build().unwrap();
     /// window.execute(|window| {
     ///     println!("Hello from the window thread!");
     ///     window.set_title("hi"); // window accessible
@@ -316,7 +318,7 @@ impl WindowBuilder {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```no_run
     /// use ramen::window::Window;
     ///
     /// let mut builder = Window::builder()

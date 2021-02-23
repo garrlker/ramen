@@ -79,13 +79,16 @@ unsafe impl Sync for Window {}
 ///
 /// # Example
 ///
-/// ```rust
+/// ```no_run
 /// use ramen::platform::win32::WindowBuilderExt as _;
 /// use ramen::window::Window;
 ///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let window = Window::builder()
 ///     .tool_window(true)
 ///     .build()?;
+/// # Ok(())
+/// # }
 /// ```
 pub trait WindowBuilderExt {
     /// Sets whether the window uses the [`WS_EX_TOOLWINDOW`](
