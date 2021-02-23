@@ -102,6 +102,16 @@ impl Window {
         self.inner.execute(&mut move || f(self));
     }
 
+    /// Gets the inner size of the window.
+    ///
+    /// ```no_run
+    /// # let window = ramen::window::Window::builder().build().unwrap();
+    /// let (size, scale) = window.inner_size();
+    ///
+    /// let (lwidth, lheight) = size.logical(scale); // get logical size
+    /// let (pwidth, pheight) = size.physical(scale); // get physical size
+    /// ```
+    // TODO: physical when??? etc,
     #[inline]
     pub fn inner_size(&self) -> (Size, Scale) {
         self.inner.inner_size()
