@@ -177,27 +177,12 @@ impl<T, F: FnOnce() -> T> Deref for LazyCell<T, F> {
     }
 }
 
-/// Rust allows you to have null characters in your strings, which is pretty neat,
-/// but the native C APIs we have to interact with see it as a null *terminator*.
-///
-/// This function replaces all instances of null in a string with b' ' (space).
-pub(crate) fn _str_filter_nulls(x: &mut String) {
-    // Safety: 0x00 and b' ' are one-byte sequences that can't mean anything else in UTF-8.
-    unsafe {
-        for byte in x.as_mut_vec() {
-            if *byte == 0x00 {
-                *byte = b' ';
-            }
-        }
-    }
-}
-
 /// Wrapper for working with both `std` and `parking_lot`.
 /// None of these functions should panic when used correctly as they're used in FFI.
 #[cfg(not(feature = "parking-lot"))]
 pub(crate) mod sync {
     pub use std::sync::{Condvar, Mutex, MutexGuard};
-    use std::{ptr, process};
+    use std::ptr;
 
     #[inline]
     pub fn condvar_notify1(cvar: &Condvar) {
@@ -209,19 +194,13 @@ pub(crate) mod sync {
         // We "move it out" for the duration of the wait
         unsafe {
             let guard_copy = ptr::read(guard);
-            let result = cvar.wait(guard_copy).unwrap_or_else(|_poi| {
-                eprintln!("Condvar's mutex was poisoned! This is a bug.");
-                process::exit(1);
-            });
+            let result = cvar.wait(guard_copy).expect("cvar mutex poisoned (this is a bug)");
             ptr::write(guard, result);
         }
     }
 
     pub fn mutex_lock<T>(mtx: &Mutex<T>) -> MutexGuard<T> {
-        mtx.lock().unwrap_or_else(|_poi| {
-            eprintln!("Mutex was poisoned! This is a bug.");
-            process::exit(1);
-        })
+        mtx.lock().expect("mutex poisoned (this is a bug)")
     }
 }
 #[cfg(feature = "parking-lot")]
@@ -230,7 +209,7 @@ pub(crate) mod sync {
 
     #[inline]
     pub fn condvar_notify1(cvar: &Condvar) {
-        cvar.notify_one();
+        let _ = cvar.notify_one();
     }
 
     #[inline]
