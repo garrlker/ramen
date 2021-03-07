@@ -231,7 +231,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
     let window_thread = thread_builder.spawn(move || unsafe {
         // TODO: Sanitize reserved window classes
         let mut class_info = mem::MaybeUninit::<WNDCLASSEXW>::uninit();
-        (&mut *class_info.as_mut_ptr()).cbSize = mem::size_of_val(&class_info) as DWORD;
+        (*class_info.as_mut_ptr()).cbSize = mem::size_of_val(&class_info) as DWORD;
 
         let mut class_name_buf = Vec::new();
         let class_name = util::str_to_wide_null(builder.class_name.as_ref(), &mut class_name_buf);
@@ -348,7 +348,7 @@ pub(crate) fn make_window(builder: &WindowBuilder) -> Result<WindowRepr, Error> 
             // This is one of the main motivations (besides no blocking) to give each window a thread.
             match GetMessageW(&mut msg, ptr::null_mut(), 0, 0) {
                 -1 => panic!("Hard error {:#06X} in GetMessageW loop!", GetLastError()),
-                0 => if (&*user_data_ptr).destroy_flag.load(atomic::Ordering::Acquire) {
+                0 => if (*user_data_ptr).destroy_flag.load(atomic::Ordering::Acquire) {
                     break 'message_loop
                 },
                 _ => {
