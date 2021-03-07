@@ -127,7 +127,7 @@ pub unsafe fn is_windows_ver_or_greater(dl: &Win32DL, major: WORD, minor: WORD, 
     osvi.dwOSVersionInfoSize = mem::size_of_val(&osvi) as DWORD;
     osvi.dwMajorVersion = major.into();
     osvi.dwMinorVersion = minor.into();
-    osvi.wServicePackMajor = sp_major.into();
+    osvi.wServicePackMajor = sp_major;
 
     let mask = VER_MAJORVERSION | VER_MINORVERSION | VER_SERVICEPACKMAJOR;
     let mut cond = VerSetConditionMask(0, VER_MAJORVERSION, VER_GREATER_EQUAL);
