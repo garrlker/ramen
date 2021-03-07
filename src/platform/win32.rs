@@ -36,8 +36,9 @@ const RAMEN_WM_DESTROY: UINT = WM_USER + 1;
 const RAMEN_WM_SETTEXT_ASYNC: UINT = WM_USER + 2;
 const RAMEN_WM_SETCONTROLS: UINT = WM_USER + 3;
 const RAMEN_WM_SETTHICKFRAME: UINT = WM_USER + 4;
+const RAMEN_WM_GETDPIDATA: UINT = WM_USER + 5;
 #[cfg(feature = "cursor-lock")]
-const RAMEN_WM_SETCURSORLOCK: UINT = WM_USER + 5;
+const RAMEN_WM_SETCURSORLOCK: UINT = WM_USER + 6;
 
 #[derive(Debug)]
 pub struct InternalError {
@@ -191,10 +192,10 @@ struct WindowUserData {
     focus_state: bool,
     window_style: WindowStyle,
 
-    dpi_data: Mutex<WindowUserDpiData>,
+    dpi_data: WindowUserDpiData,
 }
 
-#[derive(Default)]
+#[derive(Copy, Clone, Default)]
 struct WindowUserDpiData {
     client: (u32, u32),
     dpi: UINT,
@@ -400,11 +401,20 @@ impl WindowImpl for Window {
     }
 
     fn inner_size(&self) -> (Size, Scale) {
-        let lock = mutex_lock(&unsafe { &*self.user_data.get() }.dpi_data);
-        let (width, height) = lock.client;
-        let factor = lock.scale_factor;
+        let mut data = mem::MaybeUninit::<WindowUserDpiData>::uninit();
+        let info = unsafe {
+            let _ = SendMessageW(
+                self.hwnd,
+                RAMEN_WM_GETDPIDATA,
+                0,
+                data.as_mut_ptr() as LPARAM,
+            );
+            &*data.as_ptr()
+        };
+        let (width, height) = info.client;
+        let factor = info.scale_factor;
         let inner_size = Size::Physical(width, height);
-        if lock.is_logical {
+        if info.is_logical {
             (inner_size.to_logical(factor), factor)
         } else {
             (inner_size, factor)
@@ -567,14 +577,12 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             let dpi = util::BASE_DPI;
             let dpi_fac = dpi as f64 / util::BASE_DPI as f64;
 
-            let mut lock = mutex_lock(&user_data.dpi_data);
-            *lock = WindowUserDpiData {
+            user_data.dpi_data = WindowUserDpiData {
                 client: builder.inner_size.physical(dpi_fac),
                 dpi: dpi,
                 is_logical: matches!(builder.inner_size, Size::Logical(..)),
                 scale_factor: dpi_fac,
             };
-            mem::drop(lock);
 
             // Copy style, cursor lock mode, etc
             user_data.window_style = builder.style.clone();
@@ -815,6 +823,15 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
                 user_data.window_style.resizable = resizable;
                 user_data.window_style.set_for(hwnd);
             }
+            0
+        },
+
+        // Custom event: Get the WindowUserDpiData struct.
+        // wParam: Unused, set to zero.
+        // lParam: *mut WindowUserDpiData (out).
+        RAMEN_WM_GETDPIDATA => {
+            let user_data = user_data(hwnd);
+            *(lparam as *mut WindowUserDpiData) = user_data.dpi_data;
             0
         },
 
